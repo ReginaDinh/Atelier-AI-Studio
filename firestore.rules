@@ -1,0 +1,210 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChatSession(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'isPinned', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'name', 'folderId', 'isPinned', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 200
+        && (!('folderId' in data) || (data.folderId is string && data.folderId.size() <= 128))
+        && data.isPinned is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['sessionId', 'ownerId', 'role', 'content', 'createdAt'])
+        && data.keys().hasOnly(['sessionId', 'ownerId', 'role', 'content', 'createdAt'])
+        && data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 && data.sessionId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.role is string && data.role.size() <= 16 && (data.role == 'user' || data.role == 'model')
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 100000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserMemoryItem(data) {
+      return data.keys().hasAll(['ownerId', 'key', 'value', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'key', 'value', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.key is string && data.key.size() >= 1 && data.key.size() <= 120
+        && data.value is string && data.value.size() >= 1 && data.value.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBioscienceRecord(data) {
+      return data.keys().hasAll(['ownerId', 'category', 'identifier', 'title', 'summary', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'category', 'identifier', 'title', 'summary', 'sourceUrl', 'createdAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.category is string && data.category.size() <= 32
+        && (data.category == 'protein' || data.category == 'genomics' || data.category == 'chemistry' || data.category == 'literature')
+        && data.identifier is string && data.identifier.size() >= 1 && data.identifier.size() <= 120
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 20000
+        && (!('sourceUrl' in data) || (data.sourceUrl is string && data.sourceUrl.size() <= 1024))
+        && data.createdAt is timestamp;
+    }
+
+    // 1. User Profiles (/users/{userId})
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && existing().uid == request.auth.uid
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(userId) && existing().uid == request.auth.uid;
+    }
+
+    // 2. Chat Sessions (/sessions/{sessionId})
+    match /sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().id == sessionId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'folderId', 'isPinned', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
+
+      // 3. Session Messages Subcollection (/sessions/{sessionId}/messages/{messageId})
+      match /messages/{messageId} {
+        allow get: if isSignedIn()
+          && isValidId(sessionId)
+          && isValidId(messageId)
+          && existing().ownerId == request.auth.uid
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+        allow list: if isSignedIn()
+          && existing().ownerId == request.auth.uid;
+        allow create: if isVerifiedUser()
+          && isValidId(sessionId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming())
+          && incoming().sessionId == sessionId
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/sessions/$(sessionId))
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+        allow update: if isVerifiedUser()
+          && isValidId(sessionId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming())
+          && existing().ownerId == request.auth.uid
+          && incoming().ownerId == existing().ownerId
+          && incoming().sessionId == existing().sessionId
+          && incoming().role == existing().role
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['content'])
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+        allow delete: if isVerifiedUser()
+          && isValidId(sessionId)
+          && isValidId(messageId)
+          && existing().ownerId == request.auth.uid
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+      }
+    }
+
+    // 4. User Memories (/memories/{memoryId})
+    match /memories/{memoryId} {
+      allow get: if isSignedIn() && isValidId(memoryId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(memoryId)
+        && isValidUserMemoryItem(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(memoryId)
+        && isValidUserMemoryItem(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['key', 'value', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(memoryId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 5. Saved Bioscience Records (/bioscienceRecords/{recordId})
+    match /bioscienceRecords/{recordId} {
+      allow get: if isSignedIn() && isValidId(recordId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidBioscienceRecord(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidBioscienceRecord(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().identifier == existing().identifier
+        && incoming().category == existing().category
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'summary', 'sourceUrl']);
+      allow delete: if isVerifiedUser() && isValidId(recordId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}

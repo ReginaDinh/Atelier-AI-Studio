@@ -1,0 +1,226 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public user profile metadata synchronized on Google Sign-In.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar URL",
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["uid", "displayName", "createdAt", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "User conversation session metadata stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Session identifier",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the session owner",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Session title",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "folderId": {
+          "type": "string",
+          "description": "Optional folder ID",
+          "maxLength": 128
+        },
+        "isPinned": {
+          "type": "boolean",
+          "description": "Whether session is pinned"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "ownerId", "name", "isPinned", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Individual chat message inside a user session.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Parent session ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the message owner",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "model"],
+          "description": "Sender role",
+          "maxLength": 16
+        },
+        "content": {
+          "type": "string",
+          "description": "Markdown or LaTeX message content",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Message timestamp"
+        }
+      },
+      "required": ["sessionId", "ownerId", "role", "content", "createdAt"]
+    },
+    "UserMemoryItem": {
+      "title": "UserMemoryItem",
+      "description": "Persistent user memory fact or preference stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the owner",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "key": {
+          "type": "string",
+          "description": "Memory category key",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "value": {
+          "type": "string",
+          "description": "Memory fact content",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp"
+        }
+      },
+      "required": ["ownerId", "key", "value", "createdAt", "updatedAt"]
+    },
+    "BioscienceRecord": {
+      "title": "BioscienceRecord",
+      "description": "Saved protein structure, genomic variant, chemical compound, or literature note.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the researcher",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["protein", "genomics", "chemistry", "literature"],
+          "description": "Scientific domain category",
+          "maxLength": 32
+        },
+        "identifier": {
+          "type": "string",
+          "description": "Accession ID, Gene symbol, CID, or PMID",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title of the biological or chemical entity",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "summary": {
+          "type": "string",
+          "description": "Key scientific metadata and AI grounded synthesis",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "sourceUrl": {
+          "type": "string",
+          "description": "Authoritative database URL",
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Saved timestamp"
+        }
+      },
+      "required": ["ownerId", "category", "identifier", "title", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public user profile document owned by userId"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "Chat sessions owned by authenticated users"
+    },
+    "/sessions/{sessionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages belonging to a specific chat session"
+    },
+    "/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/UserMemoryItem" },
+      "description": "Long-term personal intelligence memory items owned by user"
+    },
+    "/bioscienceRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/BioscienceRecord" },
+      "description": "Saved bioinformatics, genomics, chemistry, and literature records"
+    }
+  }
+}

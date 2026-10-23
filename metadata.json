@@ -1,0 +1,6 @@
+{
+  "name": "Gemini Pro Chatbot",
+  "description": "A full-featured AI chatbot with RAG, chat history, token optimization, and customizable parameters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

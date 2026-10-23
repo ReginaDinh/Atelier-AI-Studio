@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Studio — Flagship Cognitive AI Workspace</title>
+    <meta name="description" content="Không gian làm việc AI chuyên sâu với Hội đồng 3 chuyên gia phản biện, Deep Research, Interactive Canvas, Đồ thị tri thức D3.js và Phân tích dữ liệu." />
+    <meta property="og:title" content="Gemini Studio — Flagship Cognitive AI Workspace" />
+    <meta property="og:description" content="Không gian làm việc AI chuyên sâu với Hội đồng 3 chuyên gia phản biện, Deep Research, Interactive Canvas, Đồ thị tri thức D3.js và Phân tích dữ liệu." />
+    <!-- Preconnect & Fonts for crisp modern typographic alignment -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        // AI Studio environment: HMR is disabled; intercept Vite HMR WebSocket attempts to prevent unhandled rejection
+        try {
+          var NativeWebSocket = window.WebSocket;
+          if (NativeWebSocket) {
+            window.WebSocket = function(url, protocols) {
+              if (protocols === 'vite-hmr' || protocols === 'vite-ping') {
+                var handlers = {};
+                var fake = {
+                  readyState: 1,
+                  OPEN: 1,
+                  CLOSED: 3,
+                  CLOSING: 2,
+                  CONNECTING: 0,
+                  url: url,
+                  protocol: protocols,
+                  send: function() {},
+                  close: function() { fake.readyState = 3; },
+                  addEventListener: function(type, listener) {
+                    handlers[type] = handlers[type] || [];
+                    handlers[type].push(listener);
+                    if (type === 'open') {
+                      setTimeout(function() {
+                        listener({ type: 'open', target: fake });
+                      }, 0);
+                    }
+                  },
+                  removeEventListener: function(type, listener) {
+                    if (handlers[type]) {
+                      handlers[type] = handlers[type].filter(function(l) { return l !== listener; });
+                    }
+                  }
+                };
+                return fake;
+              }
+              return new NativeWebSocket(url, protocols);
+            };
+            window.WebSocket.prototype = NativeWebSocket.prototype;
+            window.WebSocket.CONNECTING = 0;
+            window.WebSocket.OPEN = 1;
+            window.WebSocket.CLOSING = 2;
+            window.WebSocket.CLOSED = 3;
+          }
+        } catch (e) {}
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var msg = event && event.reason && (event.reason.message || String(event.reason));
+          if (typeof msg === 'string' && (msg.includes('WebSocket') || msg.includes('vite:ws') || msg.includes('@vite/client'))) {
+            event.preventDefault();
+          }
+        });
+        window.addEventListener('error', function(event) {
+          var msg = event && (event.message || (event.error && event.error.message) || '');
+          if (typeof msg === 'string' && (msg.includes('WebSocket') || msg.includes('vite:ws') || msg.includes('@vite/client'))) {
+            event.preventDefault();
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body class="antialiased font-sans select-text">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
