@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { 
   Plus, 
   MessageSquare, 
@@ -28,6 +28,7 @@ import {
   Code2,
   Terminal,
   Check,
+  Copy,
   BookOpen,
   Mic,
   Image as ImageIcon,
@@ -62,15 +63,21 @@ import {
   Printer,
   Dna,
   Cloud,
-  LogOut
+  Layers,
+  AlertCircle,
+  LogOut,
+  LayoutGrid,
+  SquarePen,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { cn } from './lib/utils';
-import { Message, Session, ChatSettings, UserMemory, Document, Note, ArtifactItem, Persona, Folder } from './types';
+import { Message, Session, ChatSettings, UserMemory, Document, Note, ArtifactItem, Persona, Folder, ReasoningEffortLevel, KeyInsightConclusion } from './types';
 import { 
   getGeminiResponse, 
   summarizeHistory, 
@@ -80,20 +87,19 @@ import {
   generateFollowUpAndAlignment,
   runCouncilDebate,
   runDeepResearch,
+  extractStrategicConclusionsLocally,
   editWithCanvasAI,
   detectOptimalPersona,
   setActiveGeminiModel,
   distillTurnIntoMemoryAndNote,
   extractMemoryAndNotesFromHistoryWithAI,
   evaluateAndEvolveTurnLocally,
-  runReflexionSelfRefineWithAI
+  runReflexionSelfRefineWithAI,
+  synthesizeAutonomousSessionMeta,
+  categorizeSessionsWithTopicClusters
 } from './services/geminiService';
-import MermaidRenderer from './components/MermaidRenderer';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import KnowledgeGraph from './components/KnowledgeGraph';
 import CouncilDebateView from './components/CouncilDebateView';
 import DeepResearchTracker from './components/DeepResearchTracker';
-import DataAnalystStudio from './components/DataAnalystStudio';
 import ThemeGalleryModal, { THEMES_LIST } from './components/ThemeGalleryModal';
 import AIIdentityModal, { DEFAULT_AI_IDENTITY } from './components/AIIdentityModal';
 import PersonaManagerModal, { DEFAULT_PERSONAS } from './components/PersonaManagerModal';
@@ -105,9 +111,12 @@ import CanvasWorkspace, {
   triggerCleanPdfPrint,
   downloadWordDoc
 } from './components/CanvasWorkspace';
-import { BioscienceStudio } from './components/BioscienceStudio';
 import SelfEvolvingStudio, { DEFAULT_EVOLVED_RULES } from './components/SelfEvolvingStudio';
+import BatchTaskDashboard from './components/BatchTaskDashboard';
+import AtelierLogo from './components/AtelierLogo';
+import useBatchQueue from './hooks/useBatchQueue';
 import { VectorIcon } from './components/VectorIcon';
+import { PWAInstallButton, OfflineIndicator } from './components/PWAInstallButton';
 import {
   auth,
   onAuthStateChanged,
@@ -119,9 +128,18 @@ import {
   saveMemoryToFirestore,
   deleteMemoryFromFirestore,
   subscribeToBioscienceRecords,
+  reconcileBidirectionalCloudSync,
   SavedBioscienceRecord,
   FirebaseUser
 } from './firebase';
+
+const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard'));
+const KnowledgeGraph = lazy(() => import('./components/KnowledgeGraph'));
+const DataAnalystStudio = lazy(() => import('./components/DataAnalystStudio'));
+const BioscienceStudio = lazy(() =>
+  import('./components/BioscienceStudio').then((m) => ({ default: m.BioscienceStudio }))
+);
+const LazyMermaidRenderer = lazy(() => import('./components/MermaidRenderer'));
 import { StudioTheme } from './types';
 
 export const PERSONAS = DEFAULT_PERSONAS;
@@ -153,57 +171,105 @@ export const AVAILABLE_MODELS = [
     name: 'Auto Hybrid (Flash ↔ Pro)',
     shortLabel: 'Auto Hybrid',
     tier: 'hybrid' as const,
-    badge: 'Tiết kiệm 80%',
-    desc: 'Tự động dùng Flash cho câu ngắn & kích hoạt Gemini 4 Pro cho Toán, Code, LaTeX, Bài báo Q1'
+    badge: 'Recommended',
+    desc: 'Intelligently activates Pro for complex STEM/reasoning and Flash for quick turns to save 80% quota'
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro',
+    shortLabel: 'Gemini 3.1 Pro',
+    tier: 'pro' as const,
+    badge: 'Latest Pro',
+    desc: 'Next-gen 3.1 Pro — Deep reasoning, complex problem solving, math & STEM'
   },
   {
     id: 'gemini-4-argon',
     name: 'Gemini 4 Pro (Argon)',
     shortLabel: 'Gemini 4 Pro',
     tier: 'pro' as const,
-    badge: 'Pro Flagship',
-    desc: 'Mô hình Pro mạnh nhất: Suy luận sâu, Toán học, Code phức tạp, LaTeX & Bài báo Q1'
-  },
-  {
-    id: 'gemini-3.1-pro-preview',
-    name: 'Gemini 3.1 Pro Preview',
-    shortLabel: 'Gemini 3.1 Pro',
-    tier: 'pro' as const,
-    badge: 'Pro Preview',
-    desc: 'Mô hình Pro chuyên sâu cho phân tích học thuật, kiến trúc hệ thống & STEM'
+    badge: 'Flagship',
+    desc: 'Peak reasoning, advanced math, complex code, LaTeX & Q1 papers'
   },
   {
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     shortLabel: 'Gemini 2.5 Pro',
     tier: 'pro' as const,
-    badge: 'Pro Stable',
-    desc: 'Mô hình Pro ổn định cho suy luận logic đa bước và tổng hợp tài liệu lớn'
+    badge: 'Stable',
+    desc: 'Stable Pro model for multi-step reasoning and deep text analysis'
   },
   {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash',
     shortLabel: 'Gemini 3.8 Flash',
     tier: 'flash' as const,
-    badge: 'Flash Chuẩn',
-    desc: 'Cân bằng tối ưu giữa tốc độ phản hồi nhanh và suy luận đa nhiệm'
+    badge: 'Balanced',
+    desc: 'Balanced high throughput and response fidelity'
   },
   {
     id: 'gemini-3.1-flash-lite',
     name: 'Gemini 3.1 Flash Lite',
-    shortLabel: 'Gemini 3.1 Lite',
+    shortLabel: 'Flash Lite',
     tier: 'flash' as const,
-    badge: 'Siêu tốc',
-    desc: 'Phản hồi tức thì, độ trễ cực thấp cho tác vụ hỏi đáp nhanh'
+    badge: 'Ultra-fast',
+    desc: 'Near-instant responses for rapid high-throughput tasks'
+  }
+];
+
+export const REASONING_EFFORT_OPTIONS: {
+  id: ReasoningEffortLevel;
+  code: string;
+  name: string;
+  shortLabel: string;
+  badge: string;
+  desc: string;
+  dotColor: string;
+}[] = [
+  {
+    id: 'auto',
+    code: 'Auto',
+    name: 'Adaptive (Auto)',
+    shortLabel: 'Auto',
+    badge: 'Adaptive',
+    desc: 'Dynamically scales reasoning depth to match query complexity',
+    dotColor: 'bg-emerald-400',
   },
   {
-    id: 'gemini-flash-latest',
-    name: 'Gemini Flash Latest',
-    shortLabel: 'Flash Latest',
-    tier: 'flash' as const,
-    badge: 'Auto-Update',
-    desc: 'Phiên bản Flash mới nhất được cập nhật liên tục'
-  }
+    id: 'high',
+    code: 'High',
+    name: 'Maximum (High)',
+    shortLabel: 'High',
+    badge: 'ThinkingLevel.HIGH',
+    desc: 'Full reasoning budget for math, STEM, algorithms & research papers',
+    dotColor: 'bg-purple-400',
+  },
+  {
+    id: 'medium',
+    code: 'Med',
+    name: 'Medium (Balanced)',
+    shortLabel: 'Medium',
+    badge: 'ThinkingLevel.MEDIUM',
+    desc: 'Balanced analytical depth, latency, and quota efficiency',
+    dotColor: 'bg-amber-400',
+  },
+  {
+    id: 'low',
+    code: 'Low',
+    name: 'Low (Fast)',
+    shortLabel: 'Fast',
+    badge: 'ThinkingLevel.LOW',
+    desc: 'Low-latency thinking, direct and fast response',
+    dotColor: 'bg-sky-400',
+  },
+  {
+    id: 'minimal',
+    code: 'Min',
+    name: 'Minimal (Direct)',
+    shortLabel: 'Instant',
+    badge: 'ThinkingLevel.MINIMAL',
+    desc: 'Instant direct response without internal reasoning (Flash-optimized)',
+    dotColor: 'bg-slate-400',
+  },
 ];
 
 function extractArtifacts(content: string): { type: 'html' | 'svg' | 'mermaid' | 'latex'; code: string } | null {
@@ -248,9 +314,10 @@ function extractArtifacts(content: string): { type: 'html' | 'svg' | 'mermaid' |
 
 export default function App() {
   const [theme, setTheme] = useState<StudioTheme>(() => {
-    return (localStorage.getItem('studio_theme') as any) || 'editorial';
+    const saved = localStorage.getItem('studio_theme');
+    if (saved === 'dark' || saved === 'midnight' || saved === 'terminal' || saved === 'aurora') return 'dark';
+    return 'editorial';
   });
-  const [isThemeGalleryOpen, setIsThemeGalleryOpen] = useState(false);
   const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
   const [personas, setPersonas] = useState<Persona[]>(() => {
     try {
@@ -347,7 +414,44 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Detect mobile phone / virtual keyboard to prevent accidental sends on Enter
+  const isMobileDevice = () => {
+    if (typeof window === 'undefined') return false;
+    const hasTouchScreen = (
+      'ontouchstart' in window ||
+      navigator.maxTouchPoints > 0 ||
+      // @ts-ignore
+      (navigator.msMaxTouchPoints && navigator.msMaxTouchPoints > 0)
+    );
+    const isMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isSmallScreen = window.innerWidth <= 768;
+    return hasTouchScreen || isMobileUserAgent || isSmallScreen;
+  };
+
+  const handleStopExecution = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    showFolderToast('Execution stopped', 'info');
+  };
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isLoading) {
+        e.preventDefault();
+        handleStopExecution();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isLoading]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : true
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -356,14 +460,44 @@ export default function App() {
   const [renamingSessionName, setRenamingSessionName] = useState('');
   
   const [sidebarSection, setSidebarSection] = useState<'chats' | 'memory' | 'documents' | 'notebook'>('chats');
-  const [currentView, setCurrentView] = useState<'chat' | 'analytics' | 'graph' | 'data' | 'bioscience' | 'evolution'>('chat');
+  const [sidebarNavMode, setSidebarNavMode] = useState<'chats' | 'studios' | 'knowledge'>('chats');
+  const [currentView, setCurrentView] = useState<'chat' | 'analytics' | 'graph' | 'data' | 'bioscience' | 'evolution' | 'tasks'>('chat');
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [savedBioscienceRecords, setSavedBioscienceRecords] = useState<SavedBioscienceRecord[]>([]);
   const [memory, setMemory] = useState<UserMemory[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
 
-  // Firebase Auth & Firestore Bioscience Cloud Subscription
+  const handleBidirectionalCloudSync = async (targetUserId?: string, silent = false) => {
+    const resolvedUser = targetUserId || userId || localStorage.getItem('chat_user_id');
+    if (!resolvedUser || !auth.currentUser || isSyncingCloud) return;
+    setIsSyncingCloud(true);
+    try {
+      const report = await reconcileBidirectionalCloudSync(resolvedUser);
+      await Promise.all([fetchSessions(), fetchMemory()]);
+      if (currentSessionId) {
+        await fetchMessages(currentSessionId);
+      }
+      const totalChanges =
+        report.hydratedSessions + report.hydratedMemories + report.pushedSessions + report.pushedMemories;
+      if (!silent || totalChanges > 0) {
+        showFolderToast(
+          `2-way Cloud sync completed (`,
+          'success'
+        );
+      }
+    } catch (err) {
+      console.error('Bidirectional Cloud Sync error:', err);
+      if (!silent) {
+        showFolderToast('Cloud sync unavailable at the moment', 'info');
+      }
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  // Firebase Auth & Firestore Bioscience Cloud Subscription + Auto Two-Way Sync
   useEffect(() => {
     let unsubRecords: (() => void) | null = null;
     const unsubAuth = onAuthStateChanged(auth, (fbUser) => {
@@ -374,13 +508,35 @@ export default function App() {
       }
       if (fbUser) {
         const displayId = formatCompactUserName(fbUser.email || fbUser.uid, fbUser);
-        if (!localStorage.getItem('chat_user_id')) {
+        const existingLocalId = localStorage.getItem('chat_user_id');
+        const activeId = existingLocalId || displayId;
+        if (!existingLocalId) {
           localStorage.setItem('chat_user_id', displayId);
           setUserId(displayId);
         }
         unsubRecords = subscribeToBioscienceRecords(fbUser.uid, (records) => {
           setSavedBioscienceRecords(records);
         });
+        setIsSyncingCloud(true);
+        reconcileBidirectionalCloudSync(activeId)
+          .then(async (report) => {
+            if (report.hydratedSessions > 0 || report.hydratedMessages > 0 || report.hydratedMemories > 0) {
+              const [sessRes, memRes] = await Promise.all([
+                fetch(`/api/sessions?userId=${encodeURIComponent(activeId)}`),
+                fetch(`/api/memory?userId=${encodeURIComponent(activeId)}`),
+              ]);
+              if (sessRes.ok) {
+                const sessData = await sessRes.json().catch(() => null);
+                if (Array.isArray(sessData)) setSessions(sessData);
+              }
+              if (memRes.ok) {
+                const memData = await memRes.json().catch(() => null);
+                if (Array.isArray(memData)) setMemory(memData);
+              }
+            }
+          })
+          .catch((e) => console.warn('Initial background cloud sync skipped:', e))
+          .finally(() => setIsSyncingCloud(false));
       } else {
         setSavedBioscienceRecords([]);
       }
@@ -390,6 +546,27 @@ export default function App() {
       if (unsubRecords) unsubRecords();
     };
   }, []);
+
+  // Continuous Automatic Background Sync (on Tab Focus / Visibility & Periodic Reconciliation)
+  useEffect(() => {
+    if (!firebaseUser || !userId) return;
+
+    const triggerSilentAutoSync = () => {
+      if (document.visibilityState === 'visible') {
+        handleBidirectionalCloudSync(userId, true);
+      }
+    };
+
+    const intervalId = window.setInterval(triggerSilentAutoSync, 60000);
+    window.addEventListener('focus', triggerSilentAutoSync);
+    document.addEventListener('visibilitychange', triggerSilentAutoSync);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', triggerSilentAutoSync);
+      document.removeEventListener('visibilitychange', triggerSilentAutoSync);
+    };
+  }, [firebaseUser, userId]);
 
   const [newMemoryKey, setNewMemoryKey] = useState('');
   const [newMemoryValue, setNewMemoryValue] = useState('');
@@ -407,7 +584,6 @@ export default function App() {
         return {
           model: parsed.model || 'auto-hybrid',
           smartQuotaMode: parsed.smartQuotaMode !== false,
-          systemInstruction: defaultGeneral.instruction,
           temperature: defaultGeneral.recommendedConfig?.temperature ?? 0.55,
           maxHistoryTokens: 15,
           unlimitedContext: true,
@@ -417,13 +593,22 @@ export default function App() {
           aiIdentity: parsed.aiIdentity || DEFAULT_AI_IDENTITY,
           steadfastMode: false,
           showReasoningSteps: true,
-          coreTenets: "- Luôn kiểm chứng tính xác thực và logic trước khi khẳng định.\n- Không a dua hoặc nhượng bộ trước các tiền đề phi logic hoặc ngụy biện.\n- Tôn trọng người dùng nhưng kiên định bảo vệ sự thật khách quan.",
+          coreTenets: "- Strictly verify empirical facts and formal logic before affirming.\n- Never flatter biased premises or concede to fallacies.\n- Respect user intent while steadfastly preserving objective truth.",
           councilMode: false,
           deepResearchMode: false,
           autoPersonaRouting: true,
           selfImprovementMode: parsed.selfImprovementMode !== false,
+          reasoningEffort: parsed.reasoningEffort || 'auto',
+          billingTierMode: parsed.billingTierMode || 'smart_hybrid',
+          skipBackgroundCalls: parsed.skipBackgroundCalls ?? false,
+          monthlyBudgetUsd: typeof parsed.monthlyBudgetUsd === 'number' ? parsed.monthlyBudgetUsd : 10,
           evolvedRules: Array.isArray(parsed.evolvedRules) && parsed.evolvedRules.length > 0 ? parsed.evolvedRules : DEFAULT_EVOLVED_RULES,
           ...parsed,
+          systemInstruction:
+            typeof parsed.systemInstruction === 'string' &&
+            parsed.systemInstruction.includes('mutually exclusive, collectively exhaustive (MECE) sub-dimensions')
+              ? defaultGeneral.instruction
+              : parsed.systemInstruction || defaultGeneral.instruction,
           activePersonaMeta: parsed.activePersonaMeta || {
             id: defaultGeneral.id,
             name: defaultGeneral.name,
@@ -436,7 +621,11 @@ export default function App() {
     } catch (_) {}
     return {
       model: 'auto-hybrid',
+      reasoningEffort: 'auto',
       smartQuotaMode: true,
+      billingTierMode: 'smart_hybrid',
+      skipBackgroundCalls: false,
+      monthlyBudgetUsd: 10,
       systemInstruction: defaultGeneral.instruction,
       temperature: defaultGeneral.recommendedConfig?.temperature ?? 0.55,
       maxHistoryTokens: 15,
@@ -447,7 +636,7 @@ export default function App() {
       aiIdentity: DEFAULT_AI_IDENTITY,
       steadfastMode: false,
       showReasoningSteps: true,
-      coreTenets: "- Luôn kiểm chứng tính xác thực và logic trước khi khẳng định.\n- Không a dua hoặc nhượng bộ trước các tiền đề phi logic hoặc ngụy biện.\n- Tôn trọng người dùng nhưng kiên định bảo vệ sự thật khách quan.",
+      coreTenets: "- Strictly verify empirical facts and formal logic before affirming.\n- Never flatter biased premises or concede to fallacies.\n- Respect user intent while steadfastly preserving objective truth.",
       councilMode: false,
       deepResearchMode: false,
       autoPersonaRouting: true,
@@ -462,6 +651,43 @@ export default function App() {
       }
     };
   });
+
+  const [finopsTelemetry, setFinopsTelemetry] = useState<{
+    totalCalls: number;
+    cachedCallsSaved: number;
+    fallbackCount: number;
+    estimatedInputTokens: number;
+    estimatedOutputTokens: number;
+    estimatedCostUsd: number;
+    hasConfiguredKey: boolean;
+    byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; estCostUsd: number }>;
+  } | null>(null);
+
+  const fetchFinopsTelemetry = async () => {
+    try {
+      const res = await fetch('/api/gemini/finops');
+      if (res.ok) {
+        const data = await res.json();
+        setFinopsTelemetry(data);
+      }
+    } catch (_) {}
+  };
+
+  const resetFinopsTelemetry = async () => {
+    try {
+      const res = await fetch('/api/gemini/finops/reset', { method: 'POST' });
+      if (res.ok) {
+        await fetchFinopsTelemetry();
+        showFolderToast('FinOps usage counters reset', 'info');
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      fetchFinopsTelemetry();
+    }
+  }, [isSettingsOpen]);
 
   const [selectedDoc, setSelectedDoc] = useState<Document | Note | null>(null);
   
@@ -497,6 +723,22 @@ export default function App() {
     }
   });
   const [isAutoExtractingAI, setIsAutoExtractingAI] = useState<boolean>(false);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState<boolean>(false);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const [isEffortMenuOpen, setIsEffortMenuOpen] = useState<boolean>(false);
+  const effortMenuRef = useRef<HTMLDivElement>(null);
+  const [isStudioNavExpanded, setIsStudioNavExpanded] = useState<boolean>(true);
+
+  const isProModelSelected =
+    (settings.model || 'auto-hybrid') === 'gemini-4-argon' ||
+    (settings.model || 'auto-hybrid').includes('pro');
+
+  const selectReasoningEffort = (effortId: ReasoningEffortLevel) => {
+    const resolvedEffort: ReasoningEffortLevel =
+      effortId === 'minimal' && isProModelSelected ? 'low' : effortId;
+    setSettings((prev) => ({ ...prev, reasoningEffort: resolvedEffort }));
+    setIsEffortMenuOpen(false);
+  };
 
   // Multimodal & Voice Features
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -536,6 +778,36 @@ export default function App() {
       localStorage.setItem('chat_settings', JSON.stringify(settings));
     } catch (_) {}
   }, [settings]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setIsModelMenuOpen(false);
+      }
+      if (effortMenuRef.current && !effortMenuRef.current.contains(e.target as Node)) {
+        setIsEffortMenuOpen(false);
+      }
+    }
+    if (isModelMenuOpen || isEffortMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isModelMenuOpen, isEffortMenuOpen]);
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey && !e.altKey) {
+        // Prevent browser new window / duplicate tab
+        e.preventDefault();
+        createNewSession();
+        if (currentView !== 'chat') setCurrentView('chat');
+        setSidebarNavMode('chats');
+        setSidebarSection('chats');
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, [currentView, activeFolderFilter, sessions.length]);
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window) {
@@ -580,6 +852,29 @@ export default function App() {
     }
   };
 
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
+  const handleCopyMessage = async (idKey: string, text: string, label = 'Copied message to clipboard') => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopiedMessageId(idKey);
+    showFolderToast(label, 'success');
+    setTimeout(() => {
+      setCopiedMessageId((prev) => (prev === idKey ? null : prev));
+    }, 2000);
+  };
+
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
@@ -609,46 +904,60 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const safeFetchJson = async <T,>(url: string, options?: RequestInit, fallback?: T): Promise<T> => {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) return fallback as T;
+      const text = await res.text();
+      if (!text || text.trim().startsWith('<')) return fallback as T;
+      return JSON.parse(text) as T;
+    } catch (err) {
+      console.warn(`Safe fetch fallback for ${url}:`, err);
+      return fallback as T;
+    }
+  };
+
   const fetchSessions = async () => {
     if (!userId) return;
-    const res = await fetch(`/api/sessions?userId=${encodeURIComponent(userId)}`);
-    const data = await res.json();
-    setSessions(data);
-    if (data.length > 0 && !currentSessionId) {
-      setCurrentSessionId(data[0].id);
+    const data = await safeFetchJson<Session[]>(`/api/sessions?userId=${encodeURIComponent(userId)}`, undefined, []);
+    if (Array.isArray(data)) {
+      setSessions(data);
+      if (data.length > 0 && !currentSessionId) {
+        setCurrentSessionId(data[0].id);
+      }
     }
   };
 
   const fetchFolders = async () => {
     if (!userId) return;
-    try {
-      const res = await fetch(`/api/folders?userId=${encodeURIComponent(userId)}`);
-      const data = await res.json();
+    const data = await safeFetchJson<Folder[]>(`/api/folders?userId=${encodeURIComponent(userId)}`, undefined, []);
+    if (Array.isArray(data)) {
       setFolders(data);
-    } catch (e) {
-      console.error('Failed to fetch folders:', e);
     }
   };
 
   const fetchMemory = async () => {
     if (!userId) return;
-    const res = await fetch(`/api/memory?userId=${encodeURIComponent(userId)}`);
-    const data = await res.json();
-    setMemory(data);
+    const data = await safeFetchJson<UserMemory[]>(`/api/memory?userId=${encodeURIComponent(userId)}`, undefined, []);
+    if (Array.isArray(data)) {
+      setMemory(data);
+    }
   };
 
   const fetchDocuments = async () => {
     if (!userId) return;
-    const res = await fetch(`/api/documents?userId=${encodeURIComponent(userId)}`);
-    const data = await res.json();
-    setDocuments(data);
+    const data = await safeFetchJson<Document[]>(`/api/documents?userId=${encodeURIComponent(userId)}`, undefined, []);
+    if (Array.isArray(data)) {
+      setDocuments(data);
+    }
   };
 
   const fetchNotes = async () => {
     if (!userId) return;
-    const res = await fetch(`/api/notes?userId=${encodeURIComponent(userId)}`);
-    const data = await res.json();
-    setNotes(data);
+    const data = await safeFetchJson<Note[]>(`/api/notes?userId=${encodeURIComponent(userId)}`, undefined, []);
+    if (Array.isArray(data)) {
+      setNotes(data);
+    }
   };
 
   const saveMemory = async () => {
@@ -666,7 +975,7 @@ export default function App() {
     setNewMemoryKey('');
     setNewMemoryValue('');
     fetchMemory();
-    showFolderToast(`Đã lưu vào Bộ nhớ AI: ${k}`, 'success');
+    showFolderToast(`Saved to AI Memory: ${k}`, 'success');
   };
 
   const deleteMemory = async (id: number, key?: string) => {
@@ -700,7 +1009,7 @@ export default function App() {
     setNewNoteTitle('');
     setNewNoteContent('');
     fetchNotes();
-    showFolderToast(`Đã lưu ghi chú: "${title}"`, 'success');
+    showFolderToast(`Saved note: "${title}"`, 'success');
   };
 
   const quickSaveNoteFromMessage = async (msgContent: string, questionContext?: string) => {
@@ -709,8 +1018,8 @@ export default function App() {
     const derivedTitle = headingMatch
       ? headingMatch[1].replace(/[*`_#]/g, '').trim().slice(0, 68)
       : questionContext
-      ? `Ghi chú: ${questionContext.replace(/[\n\r]+/g, ' ').slice(0, 56).trim()}`
-      : `Ghi chú AI - ${new Date().toLocaleDateString('vi-VN')}`;
+      ? `Note: ${questionContext.replace(/[\n\r]+/g, ' ').slice(0, 56).trim()}`
+      : `AI Note - ${new Date().toLocaleDateString('en-US')}`;
 
     await fetch('/api/notes', {
       method: 'POST',
@@ -723,13 +1032,13 @@ export default function App() {
     });
     await fetchNotes();
     setSidebarSection('notebook');
-    showFolderToast(`Đã lưu thẳng vào Sổ tay: "${derivedTitle}"`, 'success');
+    showFolderToast(`Saved to notebook: "${derivedTitle}"`, 'success');
   };
 
   const handleRunAIMemoryAndNotesExtraction = async () => {
     if (isAutoExtractingAI || messages.length === 0 || !userId) {
       if (messages.length === 0) {
-        showFolderToast('Hãy bắt đầu trò chuyện để AI trích xuất Bộ nhớ & Ghi chú tự động', 'info');
+        showFolderToast('Start a conversation for AI to extract memories & notes automatically', 'info');
       }
       return;
     }
@@ -762,7 +1071,7 @@ export default function App() {
           await fetch('/api/notes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, title: `[AI Tóm tắt] ${n.title}`, content: n.content })
+            body: JSON.stringify({ userId, title: `[AI Summary] ${n.title}`, content: n.content })
           });
           addedNoteCount++;
         }
@@ -771,11 +1080,11 @@ export default function App() {
       await Promise.all([fetchMemory(), fetchNotes()]);
       if (addedMemCount > 0 || addedNoteCount > 0) {
         showFolderToast(
-          `AI đã tự động trích xuất +${addedMemCount} mục Nhớ & +${addedNoteCount} Ghi chú Sổ tay!`,
+          `Automatically extracted +${addedMemCount} memories & +${addedNoteCount} notebook notes!`,
           'success'
         );
       } else {
-        showFolderToast('Bộ nhớ & Sổ tay đã cập nhật đầy đủ các thông tin mới nhất từ phiên chat!', 'info');
+        showFolderToast('AI Memory & Notes are up to date with this chat session!', 'info');
       }
     } catch (e) {
       console.error('AI Extraction error:', e);
@@ -794,18 +1103,77 @@ export default function App() {
     fetchNotes();
   };
 
+  // State & helpers for Pinned 'Key Insights' Summary Panel at the top of the chat thread
+  const [isPinnedInsightsCollapsed, setIsPinnedInsightsCollapsed] = useState(false);
+  const [copiedPinnedInsights, setCopiedPinnedInsights] = useState(false);
+
+  const togglePinDeepResearchInsights = (msgIndex: number) => {
+    setMessages((prev) =>
+      prev.map((msg, idx) => {
+        if (idx !== msgIndex || !msg.deepResearch) return msg;
+        const currentlyPinned = msg.deepResearch.isPinnedToThreadTop !== false;
+        return {
+          ...msg,
+          deepResearch: {
+            ...msg.deepResearch,
+            isPinnedToThreadTop: !currentlyPinned,
+          },
+        };
+      })
+    );
+  };
+
+  const saveStrategicConclusionsToNote = (
+    topic: string,
+    conclusions: KeyInsightConclusion[]
+  ) => {
+    const mdContent = `### 🎯 Top 5 Strategic Conclusions — ${topic}\n\n${conclusions
+      .map(
+        (c, idx) =>
+          `${idx + 1}. **[${c.category.toUpperCase()} · Impact ${c.impactScore}%] ${c.title}**\n   - **Conclusion:** ${c.conclusion}${
+            c.actionableTakeaway ? `\n   - **Strategic Action:** ${c.actionableTakeaway}` : ''
+          }`
+      )
+      .join('\n\n')}`;
+    quickSaveNoteFromMessage(mdContent, `[Key Insights] ${topic.slice(0, 56)}`);
+  };
+
+  const batchQueue = useBatchQueue({
+    userId,
+    sessions,
+    folders,
+    messages,
+    memory,
+    evolvedRules: settings.evolvedRules || DEFAULT_EVOLVED_RULES,
+    onSessionsUpdated: fetchSessions,
+    onKnowledgeUpdated: () => {
+      fetchMemory();
+      fetchNotes();
+    },
+    onRulesEvolved: (newRules) => {
+      setSettings((prev) => {
+        const existing = prev.evolvedRules || DEFAULT_EVOLVED_RULES;
+        const filteredNew = newRules.filter(
+          (nr) => !existing.some((er) => er.rule.toLowerCase().trim() === nr.rule.toLowerCase().trim())
+        );
+        return {
+          ...prev,
+          evolvedRules: [...filteredNew, ...existing],
+        };
+      });
+    },
+    onNotify: (msg, type) => showFolderToast(msg, type || 'info')
+  });
+
   const enhanceUserPrompt = async () => {
     if (!input.trim() || isEnhancing) return;
     setIsEnhancing(true);
     try {
-      const template = `Hãy tối ưu hóa câu lệnh (prompt) sau để AI trả về câu trả lời chất lượng nhất. Hãy viết lại mạch lạc, rõ ràng, bổ sung các tiêu chuẩn về tính chính xác và cấu trúc của câu trả lời. Giữ nguyên mục đích gốc của người dùng và trả về bằng tiếng Việt.
-Lưu ý quan trọng: CHỈ trả về đúng nội dung câu lệnh đã được tối ưu hóa tốt nhất, tuyệt đối không thêm bất kỳ lời mở đầu, lời giải thích hay ký hiệu khối code nào khác.
-
-Nội dung câu lệnh cần tối ưu: "${input}"`;
+      const template = `Optimize the following user prompt for maximum clarity, analytical precision, and structured depth. Return ONLY the improved prompt text directly with zero filler:\n\n"${input}"`;
 
       const response = await getGeminiResponse(
         [{ role: 'user', content: template }],
-        { ...settings, systemInstruction: "Bạn là một AI chuyên tối ưu hóa câu lệnh prompt. Chỉ trả về câu lệnh mới đã tối ưu, không giải thích." },
+        { ...settings, systemInstruction: "You are an expert prompt engineer. Return only the optimized prompt with zero filler." },
         []
       );
 
@@ -813,7 +1181,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         setInput(response.trim());
       }
     } catch (e) {
-      console.error("Lỗi tối ưu câu lệnh:", e);
+      console.error("Prompt optimization error:", e);
     } finally {
       setIsEnhancing(false);
     }
@@ -849,7 +1217,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
     }));
     if (!silent) {
       showFolderToast(
-        `Đã kích hoạt ${p.emoji} ${p.name} (Temp ${p.recommendedConfig?.temperature ?? 0.5}${p.id === 'academic_researcher' ? ' • 5-Agent Research Lab ON' : p.recommendedConfig?.steadfastMode ? ' • Steadfast' : ''})`,
+        `Activated ${p.emoji} ${p.name}${p.id === 'academic_researcher' ? ' • 5-Agent Research Lab ON' : p.recommendedConfig?.steadfastMode ? ' • Steadfast Mode' : ''}`,
         'info'
       );
     }
@@ -887,9 +1255,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
   };
 
   const fetchMessages = async (id: string) => {
-    const res = await fetch(`/api/messages/${id}`);
-    const data = await res.json();
-    setMessages(data);
+    if (!id) {
+      setMessages([]);
+      return;
+    }
+    const data = await safeFetchJson<Message[]>(`/api/messages?sessionId=${encodeURIComponent(id)}`, undefined, []);
+    if (Array.isArray(data)) {
+      setMessages(data);
+    }
   };
 
   const showFolderToast = (message: string, type: 'success' | 'info' = 'success') => {
@@ -902,49 +1275,61 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
   const handleSaveFolder = async (folderData: { id?: string; name: string; emoji: string; color: string }) => {
     if (!userId) return;
     if (folderData.id) {
-      await fetch(`/api/folders/${folderData.id}`, {
+      await fetch(`/api/folders/${encodeURIComponent(folderData.id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(folderData)
       });
-      showFolderToast(`Đã cập nhật thư mục "${folderData.name}"`);
+      showFolderToast(`Folder updated: "${folderData.name}"`);
     } else {
-      const res = await fetch('/api/folders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...folderData, userId })
-      });
-      const data = await res.json();
+      const data = await safeFetchJson<{ folder?: { id: string } }>(
+        '/api/folders',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...folderData, userId })
+        },
+        {}
+      );
       if (data?.folder?.id) {
-        setExpandedFolderIds(prev => Array.from(new Set([...prev, data.folder.id])));
+        setExpandedFolderIds(prev => Array.from(new Set([...prev, data.folder!.id])));
       }
-      showFolderToast(`Đã tạo thư mục "${folderData.name}"`);
+      showFolderToast(`Folder created: "${folderData.name}"`);
     }
     await fetchFolders();
   };
 
   const handleDeleteFolder = async (folderId: string) => {
-    await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
+    await fetch(`/api/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' });
     await fetchFolders();
     await fetchSessions();
-    showFolderToast('Đã xóa thư mục (các cuộc trò chuyện chuyển sang Chưa phân loại)');
+    showFolderToast('Folder deleted (conversations moved to Uncategorized)');
   };
 
   const moveSessionToFolder = async (sessionId: string, folderId: string | null) => {
+    const targetSession = sessions.find(s => s.id === sessionId);
     // Optimistic update
     setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
     setMovingSessionId(null);
     try {
-      await fetch(`/api/sessions/${sessionId}`, {
+      await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder_id: folderId })
       });
+      if (auth.currentUser && targetSession) {
+        saveSessionToFirestore({
+          id: sessionId,
+          name: targetSession.name,
+          folderId,
+          isPinned: Boolean(targetSession.is_pinned),
+        }).catch(console.error);
+      }
       const targetFolder = folders.find(f => f.id === folderId);
       showFolderToast(
         targetFolder 
-          ? `Đã chuyển vào "${targetFolder.emoji} ${targetFolder.name}"` 
-          : 'Đã chuyển về Chưa phân loại'
+          ? `Moved to "${targetFolder.emoji} ${targetFolder.name}"` 
+          : 'Moved to Uncategorized'
       );
     } catch (e) {
       console.error('Failed to move session:', e);
@@ -960,56 +1345,129 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
   const handleAutoCategorizeAll = async () => {
     if (folders.length === 0) {
-      showFolderToast('Vui lòng tạo ít nhất 1 thư mục trước khi phân loại tự động', 'info');
+      showFolderToast('Please create at least 1 folder before auto-sorting', 'info');
       return;
     }
     const uncategorizedSessions = sessions.filter(s => !s.folder_id || !folders.some(f => f.id === s.folder_id));
     if (uncategorizedSessions.length === 0) {
-      showFolderToast('Tất cả cuộc trò chuyện đều đã được phân loại!', 'info');
+      showFolderToast('All conversations are already categorized!', 'info');
       return;
     }
 
+    if (isAutoCategorizing) return;
     setIsAutoCategorizing(true);
-    let categorizedCount = 0;
+    showFolderToast(`Step 1/2: Analyzing message history across ${uncategorizedSessions.length} conversations for topic clusters...`, 'info');
 
     try {
-      for (const session of uncategorizedSessions.slice(0, 10)) {
-        let sampleText = '';
-        try {
-          const res = await fetch(`/api/messages/${session.id}`);
-          const msgs = await res.json();
-          sampleText = (msgs || []).slice(0, 3).map((m: any) => m.content).join(' ');
-        } catch (_) {}
+      // Step 1: Extract message histories for each uncategorized conversation
+      const sessionsWithSnippets = await Promise.all(
+        uncategorizedSessions.map(async (sess) => {
+          let snippet = sess.name;
+          // If this is the active session and has messages in state, use them directly
+          if (sess.id === currentSessionId && messages.length > 0) {
+            snippet = messages
+              .slice(0, 8)
+              .map(m => `[${m.role}]: ${m.content.slice(0, 200)}`)
+              .join('\n');
+          } else {
+            try {
+              const res = await fetch(`/api/messages/${encodeURIComponent(sess.id)}`);
+              if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data) && data.length > 0) {
+                  snippet = data
+                    .slice(0, 8)
+                    .map((m: any) => `[${m.role}]: ${m.content.slice(0, 200)}`)
+                    .join('\n');
+                }
+              }
+            } catch (_) {}
+          }
+          return {
+            id: sess.id,
+            name: sess.name,
+            messagesPreview: snippet,
+          };
+        })
+      );
 
-        const res = await fetch('/api/gemini/auto-categorize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionName: session.name,
-            sampleText,
-            folders
-          })
-        });
-        const data = await res.json();
-        if (data?.folderId) {
-          await fetch(`/api/sessions/${session.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ folder_id: data.folderId })
-          });
-          categorizedCount++;
+      // Step 2: Multi-step classification strategy (analyze message history for topic clusters, then assign categories based on these clusters)
+      const clusterResult = await categorizeSessionsWithTopicClusters(
+        sessionsWithSnippets,
+        folders,
+        { model: 'gemini-3.8-flash' }
+      );
+
+      const validFolderMap = new Map(folders.map(f => [f.id, f]));
+      let assignedCount = 0;
+      const newlyAssignedFolderIds = new Set<string>();
+
+      // Apply assignments to database and state
+      for (const assignment of clusterResult.assignments) {
+        if (assignment.folderId && validFolderMap.has(assignment.folderId)) {
+          try {
+            await fetch(`/api/sessions/${encodeURIComponent(assignment.sessionId)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder_id: assignment.folderId }),
+            });
+
+            const targetSession = uncategorizedSessions.find(s => s.id === assignment.sessionId);
+            if (auth.currentUser && targetSession) {
+              saveSessionToFirestore({
+                id: targetSession.id,
+                name: targetSession.name,
+                folderId: assignment.folderId,
+                isPinned: Boolean(targetSession.is_pinned),
+              }).catch(console.error);
+            }
+
+            assignedCount++;
+            newlyAssignedFolderIds.add(assignment.folderId);
+          } catch (patchErr) {
+            console.error(`Failed to assign session ${assignment.sessionId}:`, patchErr);
+          }
         }
       }
 
-      await fetchSessions();
-      if (categorizedCount > 0) {
-        showFolderToast(`Gemini đã tự động phân loại thành công ${categorizedCount} cuộc trò chuyện!`);
-      } else {
-        showFolderToast('Gemini chưa tìm thấy thư mục phù hợp cho các cuộc trò chuyện này.', 'info');
+      // Optimistically update React sessions state
+      if (assignedCount > 0) {
+        setSessions(prev =>
+          prev.map(s => {
+            const assignment = clusterResult.assignments.find(a => a.sessionId === s.id && !!a.folderId);
+            return assignment ? { ...s, folder_id: assignment.folderId } : s;
+          })
+        );
+        // Automatically expand the folders that received new conversations
+        setExpandedFolderIds(prev => Array.from(new Set([...prev, ...newlyAssignedFolderIds])));
+        await fetchSessions();
       }
-    } catch (err) {
-      console.error('Auto-categorize failed:', err);
-      showFolderToast('Có lỗi xảy ra khi tự động phân loại', 'info');
+
+      // Display rich cluster feedback
+      const clusterNames = clusterResult.clusters.slice(0, 3).map(c => c.topic).join(', ');
+      const moreClusterCount = clusterResult.clusters.length > 3 ? ` +${clusterResult.clusters.length - 3} more` : '';
+
+      if (assignedCount > 0) {
+        showFolderToast(
+          `Classified ${assignedCount}/${uncategorizedSessions.length} conversations into matching folders based on ${clusterResult.clusters.length} topic clusters (${clusterNames}${moreClusterCount})!`,
+          'success'
+        );
+      } else {
+        showFolderToast(
+          `Identified ${clusterResult.clusters.length} topic clusters, but none had high semantic overlap with existing folders.`,
+          'info'
+        );
+      }
+    } catch (err: any) {
+      console.error('Multi-step auto categorization failed:', err);
+      showFolderToast('Could not complete auto-classification. Falling back to background queue.', 'info');
+      // Enqueue to batchQueue as a fallback
+      batchQueue.enqueueTask(
+        'auto_categorize',
+        `Classify ${uncategorizedSessions.length} conversations into folders`,
+        `Automatically sort uncategorized conversations into ${folders.length} existing folders`,
+        { folderCount: folders.length }
+      );
     } finally {
       setIsAutoCategorizing(false);
     }
@@ -1017,7 +1475,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
   const createNewSession = async (presetFolderId?: string | null) => {
     if (!userId) return;
-    const id = crypto.randomUUID();
+    const id =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `s_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const name = `Chat ${sessions.length + 1}`;
     const targetFolderId = presetFolderId !== undefined
       ? presetFolderId
@@ -1074,6 +1535,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_pinned: newPinned })
       });
+      if (auth.currentUser) {
+        saveSessionToFirestore({
+          id: session.id,
+          name: session.name,
+          folderId: session.folder_id,
+          isPinned: newPinned,
+        }).catch(console.error);
+      }
       await fetchSessions();
     } catch (err) {
       console.error('Failed to toggle pin:', err);
@@ -1102,7 +1571,15 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed })
       });
-      showFolderToast(`Đã đổi tên hội thoại thành "${trimmed}"`, 'info');
+      if (auth.currentUser && current) {
+        saveSessionToFirestore({
+          id: sessionId,
+          name: trimmed,
+          folderId: current.folder_id,
+          isPinned: Boolean(current.is_pinned),
+        }).catch(console.error);
+      }
+      showFolderToast(`Renamed conversation to "${trimmed}"`, 'info');
     } catch (err) {
       console.error('Failed to rename session:', err);
       await fetchSessions();
@@ -1120,8 +1597,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
     setIsSearchingHistory(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&userId=${encodeURIComponent(userId)}`);
-        const data = await res.json();
+        const data = await safeFetchJson<any[]>(`/api/search?q=${encodeURIComponent(q)}&userId=${encodeURIComponent(userId)}`, undefined, []);
         if (!cancelled) {
           setSearchResults(Array.isArray(data) ? data : []);
         }
@@ -1143,7 +1619,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       const updated = [...prev];
       updated[msgIndex] = { 
         ...updated[msgIndex], 
-        emergenceAnalysis: { hasEmergence: false, confidenceScore: 0, category: 'Analyzing', explanation: 'Đang phân tích...' } 
+        emergenceAnalysis: { hasEmergence: false, confidenceScore: 0, category: 'Analyzing', explanation: 'Analyzing...' } 
       };
       return updated;
     });
@@ -1169,7 +1645,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         const updated = [...prev];
         updated[msgIndex] = { 
           ...updated[msgIndex], 
-          emergenceAnalysis: { hasEmergence: false, confidenceScore: 0, category: 'Error', explanation: 'Có lỗi xảy ra khi phân tích.' } 
+          emergenceAnalysis: { hasEmergence: false, confidenceScore: 0, category: 'Error', explanation: 'Analysis error occurred.' } 
         };
         return updated;
       });
@@ -1181,7 +1657,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       const updated = [...prev];
       updated[msgIndex] = { 
         ...updated[msgIndex], 
-        userAnalysis: { intent: 'Analyzing', emotion: '...', complexity: '...', explanation: 'Đang phân tích...' } 
+        userAnalysis: { intent: 'Analyzing', emotion: '...', complexity: '...', explanation: 'Analyzing...' } 
       };
       return updated;
     });
@@ -1207,7 +1683,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         const updated = [...prev];
         updated[msgIndex] = { 
           ...updated[msgIndex], 
-          userAnalysis: { intent: 'Error', emotion: 'Error', complexity: 'Error', explanation: 'Có lỗi xảy ra khi phân tích.' } 
+          userAnalysis: { intent: 'Error', emotion: 'Error', complexity: 'Error', explanation: 'Analysis error occurred.' } 
         };
         return updated;
       });
@@ -1342,13 +1818,64 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       setInput('');
     }
     setSelectedImages([]);
+
+    // Check for Natural-Language Chat-to-Export (Word / PDF) and Chat-to-Note intent
+    const lowerPrompt = originalInput.trim().toLowerCase();
+    const wantsWordExport =
+      /(?:xuất|tải|lưu|export|download|chuyển)\s+(?:ra\s+|sang\s+|thành\s+|file\s+|bản\s+)?(?:word|\.doc|docx)\b|\b(?:ra|sang)\s+file\s+word\b/i.test(
+        lowerPrompt
+      );
+    const wantsPdfExport =
+      /(?:xuất|tải|lưu|in|export|download|chuyển)\s+(?:ra\s+|sang\s+|thành\s+|file\s+|bản\s+)?(?:pdf|\.pdf)\b|\b(?:ra|sang)\s+file\s+pdf\b/i.test(
+        lowerPrompt
+      );
+    const wantsSaveToNote =
+      /(?:lưu|ghi|thêm|cất|chuyển|tổng hợp|tóm tắt|viết|save)\s+(?:.*?\s+)?(?:vào|ra|sang|thành|to|in)?\s*(?:note|notebook|sổ tay|ghi chú)\b/i.test(
+        lowerPrompt
+      );
+    const asksAiToSynthesizeOrWrite =
+      /viết|soạn|phân tích|tóm tắt|tổng hợp|biên tập|sửa|thêm|dịch|tạo mới|lập|rút ra/i.test(lowerPrompt);
+    const isDirectActionPreviousOnly =
+      (wantsWordExport || wantsPdfExport || wantsSaveToNote) &&
+      originalInput.trim().length < 95 &&
+      !asksAiToSynthesizeOrWrite;
+
+    const lastModelMsg = [...messages].reverse().find((m) => m.role === 'model' && m.content.trim());
+    if (isDirectActionPreviousOnly && lastModelMsg) {
+      const docTitle =
+        sessions.find((s) => s.id === currentSessionId)?.name || 'Atelier AI Report';
+      const html = `
+        <div class="paper-header">
+          <h1>${docTitle}</h1>
+          <div class="paper-date">${new Date().toLocaleDateString('vi-VN')}</div>
+        </div>
+        <div>${convertMarkdownWithMathToHtml(lastModelMsg.content)}</div>
+      `;
+      if (wantsSaveToNote) {
+        await quickSaveNoteFromMessage(lastModelMsg.content, docTitle);
+        return;
+      }
+      if (wantsWordExport) {
+        downloadWordDoc(docTitle, docTitle, html);
+        showFolderToast('Exported previous response to Word (.doc) — 0 API calls used', 'success');
+      } else if (wantsPdfExport) {
+        triggerCleanPdfPrint(docTitle, html, false);
+        showFolderToast('Opened PDF print view for previous response — 0 API calls used', 'success');
+      }
+      return;
+    }
+
     setIsLoading(true);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      // Ensure an active session exists; auto-create one if currentSessionId is null
+      // Ensure an active session exists; auto-create one with placeholder 'Chat X' if currentSessionId is null
       let activeSessionId = currentSessionId;
+      const isFirstTurnInSession = messages.length === 0 || !currentSessionId;
+      const placeholderTitle = `Chat ${sessions.length + 1}`;
       const conciseTitle =
-        originalInput.trim().replace(/\s+/g, ' ').slice(0, 44) || 'Hội thoại mới';
+        originalInput.trim().replace(/\s+/g, ' ').slice(0, 44) || placeholderTitle;
 
       if (!activeSessionId) {
         activeSessionId = Math.random().toString(36).substring(7);
@@ -1358,7 +1885,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             : null;
         const newSession: Session = {
           id: activeSessionId,
-          name: conciseTitle,
+          name: placeholderTitle,
           folder_id: targetFolderId,
           is_pinned: 0,
         };
@@ -1369,23 +1896,6 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         });
         setSessions((prev) => [newSession, ...prev]);
         setCurrentSessionId(activeSessionId);
-      } else if (messages.length === 0) {
-        // Auto-title placeholder sessions on first user message
-        const existingSession = sessions.find((s) => s.id === activeSessionId);
-        if (
-          existingSession &&
-          /^(Chat \d+|Hội thoại mới)$/i.test(existingSession.name.trim()) &&
-          originalInput.trim().length > 0
-        ) {
-          setSessions((prev) =>
-            prev.map((s) => (s.id === activeSessionId ? { ...s, name: conciseTitle } : s))
-          );
-          fetch(`/api/sessions/${activeSessionId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: conciseTitle }),
-          }).catch(console.error);
-        }
       }
 
       const userMessage: Message = {
@@ -1406,18 +1916,25 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           sessionId: activeSessionId,
         }),
       });
-      const dataUser = await resUser.json();
+      const dataUser = await resUser.json().catch(() => ({} as any));
       setMessages(prev => {
         const newMsg = [...prev];
-        if (newMsg[newMsg.length - 1]) {
+        if (newMsg[newMsg.length - 1] && dataUser?.id) {
           newMsg[newMsg.length - 1].id = dataUser.id;
         }
         return newMsg;
       });
       if (auth.currentUser && activeSessionId) {
+        const currentSess = sessions.find(s => s.id === activeSessionId);
+        const resolvedName =
+          currentSess && !/^(Chat \d+|New Chat)$/i.test(currentSess.name.trim())
+            ? currentSess.name
+            : conciseTitle;
         saveSessionToFirestore({
           id: activeSessionId,
-          name: sessions.find(s => s.id === activeSessionId)?.name || originalInput.slice(0, 48) || 'Chat',
+          name: resolvedName,
+          folderId: currentSess?.folder_id,
+          isPinned: Boolean(currentSess?.is_pinned),
         })
           .then(() =>
             saveMessageToFirestore(activeSessionId, {
@@ -1429,24 +1946,27 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           .catch(console.error);
       }
 
-      // Background user intent & emotion analysis for dashboard
-      analyzeUser(originalInput).then(userAnalysisRes => {
-        if (userAnalysisRes && dataUser?.id) {
-          setMessages(prev => {
-            const updated = [...prev];
-            const target = updated.find(m => m.id === dataUser.id);
-            if (target) {
-              target.userAnalysis = userAnalysisRes;
-            }
-            return updated;
-          });
-          fetch(`/api/messages/${dataUser.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userAnalysis: userAnalysisRes })
-          }).catch(console.error);
-        }
-      }).catch(console.error);
+      // Background user intent & emotion analysis for dashboard (skipped when Single-Call Economy or Free Tier Lock is active)
+      const shouldSkipAuxCalls = Boolean(settings.skipBackgroundCalls) || settings.billingTierMode === 'free_tier_lock';
+      if (!shouldSkipAuxCalls) {
+        analyzeUser(originalInput).then(userAnalysisRes => {
+          if (userAnalysisRes && dataUser?.id) {
+            setMessages(prev => {
+              const updated = [...prev];
+              const target = updated.find(m => m.id === dataUser.id);
+              if (target) {
+                target.userAnalysis = userAnalysisRes;
+              }
+              return updated;
+            });
+            fetch(`/api/messages/${dataUser.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userAnalysis: userAnalysisRes })
+            }).catch(console.error);
+          }
+        }).catch(console.error);
+      }
 
       // Prepare contents for Gemini including attached context
       let actualContent = originalInput;
@@ -1454,7 +1974,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         const contextBlocks = attachedContexts.map(c => 
           `<attached_context type="${c.type}" title="${c.title}">\n${c.content}\n</attached_context>`
         ).join('\n\n');
-        actualContent = `[Các tài liệu/ghi chú đính kèm làm ngữ cảnh tham khảo]\n\n${contextBlocks}\n\nCâu hỏi/Yêu cầu của tôi: ${originalInput}`;
+        actualContent = `[Attached Documents/Notes as Reference Context]\n\n${contextBlocks}\n\nMy Query/Request: ${originalInput}`;
       }
 
       const geminiUserMessage: Message = {
@@ -1468,7 +1988,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       if (settings.unlimitedContext === false && settings.maxHistoryTokens > 0 && contextMessages.length > settings.maxHistoryTokens) {
         const summary = await summarizeHistory(contextMessages.slice(0, -2));
         contextMessages = [
-          { role: 'model', content: `Tóm tắt ngữ cảnh trước đó: ${summary}` },
+          { role: 'model', content: `Summary of preceding context: ${summary}` },
           ...contextMessages.slice(-2)
         ];
       }
@@ -1477,13 +1997,13 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       // (handled automatically once AI response completes so both user facts & structured AI insights are captured)
 
       // 2. Strict Cross-Session Episodic Recall Gate (Zero Unsolicited Bleed):
-      // Chỉ truy hồi phiên trò chuyện cũ khi người dùng CHỦ ĐỘNG nhắc tới quá khứ ("trước đó", "hôm trước", "lần trước", "tiếp tục bài...")
-      // để tránh tuyệt đối việc AI tự ý lôi chủ đề của phiên chat cũ sang phiên chat mới không liên quan.
-      const explicitPastTrigger = /trước đó|cũ|hôm trước|lần trước|như đã bàn|tiếp tục bài|ở cuộc trò chuyện/i.test(originalInput);
+      // Cross-session retrieval trigger (English + Vietnamese)
+      // Prevents topic leakage across unrelated sessions
+      const explicitPastTrigger = /earlier|previously|as discussed|last time|continue|past session|previous chat|hôm trước|lần trước|như đã bàn|phiên trước|cuộc trò chuyện trước|tiếp tục phần trước/i.test(originalInput);
 
       if (explicitPastTrigger) {
         const queryTerm = originalInput
-          .replace(/trước đó|cũ|hôm trước|lần trước|như đã bàn|tiếp tục bài|ở cuộc trò chuyện/gi, '')
+          .replace(/earlier|previously|as discussed|last time|continue|past session|previous chat|hôm trước|lần trước|như đã bàn|phiên trước|cuộc trò chuyện trước|tiếp tục phần trước/gi, '')
           .trim()
           .slice(0, 45);
         if (queryTerm && queryTerm.length >= 3) {
@@ -1493,11 +2013,11 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             .slice(0, 3);
           if (otherSessionHits.length > 0) {
             const ragContext = otherSessionHits
-              .map((r: any) => `- [Phiên "${r.session_name}"]: ${String(r.content || '').slice(0, 280)}`)
+              .map((r: any) => `- [Session "${r.session_name}"]: ${String(r.content || '').slice(0, 280)}`)
               .join('\n');
             contextMessages.unshift({
               role: 'model',
-              content: `[KÝ ỨC LIÊN PHIÊN ĐƯỢC TRUY HỒI THEO YÊU CẦU (Chỉ dùng nếu đúng ý người dùng đang hỏi)]:\n${ragContext}`,
+              content: `[RETRIEVED CROSS-SESSION MEMORY]:\n${ragContext}`,
             });
           }
         }
@@ -1535,7 +2055,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
       if (settings.autoPersonaRouting !== false && activePersonaId === 'general') {
         const routeMatch = detectOptimalPersona(originalInput, personas, activePersonaId);
-        if (routeMatch && routeMatch.confidence >= 0.72) {
+        if (routeMatch && routeMatch.confidence >= 72) {
           const routed = routeMatch.persona;
           setActivePersonaId(routed.id);
           effectiveSettings = {
@@ -1554,14 +2074,70 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           };
           setSettings(effectiveSettings);
           showFolderToast(
-            `Tự động định tuyến sang ${routed.name} (${routeMatch.reason})`,
+            `Auto-routed to ${routed.name} (${routeMatch.reason})`,
             'info'
           );
         }
       }
 
-      // Branch 1: Multi-Agent Autonomous Deep Research Lab Active
-      if (effectiveSettings.deepResearchMode) {
+      // Autonomous Intent Detection: Auto-trigger Deep Research, AI Council, or Steadfast Mode from natural language
+      const autoTriggerDeepResearch =
+        effectiveSettings.deepResearchMode ||
+        /\b(?:deep research|nghiên cứu chuyên sâu|tổng quan tài liệu|systematic review|literature review|viết bài báo khoa học|bài báo q1|báo cáo nghiên cứu chuyên sâu)\b/i.test(
+          originalInput
+        );
+      const autoTriggerCouncil =
+        settings.councilMode ||
+        /\b(?:hội đồng chuyên gia|ai council|tranh biện đa chiều|góc nhìn đa chiều|3 chuyên gia|nhiều góc nhìn chuyên gia)\b/i.test(
+          originalInput
+        );
+      const autoTriggerSteadfast =
+        effectiveSettings.steadfastMode ||
+        /\b(?:phản biện thẳng thắn|kiểm chứng nghiêm ngặt|fact[- ]?check|bắt lỗi logic|reviewer #?2|không nịnh)\b/i.test(
+          originalInput
+        );
+      if (autoTriggerSteadfast && !effectiveSettings.steadfastMode) {
+        effectiveSettings = { ...effectiveSettings, steadfastMode: true };
+      }
+
+      // High-frequency 60fps streaming batcher via requestAnimationFrame to prevent React Markdown/KaTeX re-render jank
+      let streamRafId: number | null = null;
+      const scheduleStreamingFlush = () => {
+        if (streamRafId !== null) return;
+        streamRafId = window.requestAnimationFrame(() => {
+          streamRafId = null;
+          const snapshot = aiResponseContent;
+          setMessages((prev) => {
+            if (prev.length === 0) return prev;
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: snapshot,
+            };
+            return updated;
+          });
+        });
+      };
+
+      const flushStreamingNow = () => {
+        if (streamRafId !== null) {
+          window.cancelAnimationFrame(streamRafId);
+          streamRafId = null;
+        }
+        const snapshot = aiResponseContent;
+        setMessages((prev) => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            content: snapshot,
+          };
+          return updated;
+        });
+      };
+
+      // Branch 1: Multi-Agent Autonomous Deep Research Lab Active (Manual Toggle OR Auto-Detected Intent)
+      if (autoTriggerDeepResearch) {
         const preferredResearchFormat =
           effectiveSettings.activePersonaMeta?.id === 'academic_researcher'
             ? 'imrad_q1'
@@ -1571,45 +2147,87 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           (progressData) => {
             finalDeepResearch = progressData;
             setMessages((prev) => {
+              if (prev.length === 0) return prev;
               const updated = [...prev];
-              updated[updated.length - 1].deepResearch = progressData;
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                deepResearch: progressData,
+              };
               return updated;
             });
           },
           (chunk) => {
             aiResponseContent += chunk;
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1].content = aiResponseContent;
-              return updated;
-            });
+            scheduleStreamingFlush();
           },
-          preferredResearchFormat
+          preferredResearchFormat,
+          controller.signal
         );
         aiResponseContent = researchResult.report || aiResponseContent;
         finalDeepResearch = researchResult.researchData;
         groundingMetadata = researchResult.groundingMetadata;
+        flushStreamingNow();
       } else {
         // Standard / 5-Layer Cognitive Persona Streaming Response
-        await getGeminiResponse(contextMessages, effectiveSettings, memory, (chunk) => {
-          aiResponseContent += chunk;
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].content = aiResponseContent;
-            return newMessages;
-          });
-        }, (metadata) => {
-          groundingMetadata = metadata;
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].groundingMetadata = metadata;
-            return newMessages;
-          });
-        });
+        await getGeminiResponse(
+          contextMessages,
+          effectiveSettings,
+          memory,
+          (chunk) => {
+            aiResponseContent += chunk;
+            scheduleStreamingFlush();
+          },
+          (metadata) => {
+            groundingMetadata = metadata;
+            setMessages(prev => {
+              if (prev.length === 0) return prev;
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                ...newMessages[newMessages.length - 1],
+                groundingMetadata: metadata,
+              };
+              return newMessages;
+            });
+          },
+          controller.signal
+        );
+        flushStreamingNow();
       }
 
-      // If Council Mode is toggled ON, also run the 3-Expert Council Debate in parallel/sequence
-      if (settings.councilMode) {
+      // Check if user clicked Stop during execution
+      if (controller.signal.aborted) {
+        if (aiResponseContent.trim() && activeSessionId) {
+          const resAi = await fetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: activeSessionId,
+              role: 'model',
+              content: aiResponseContent,
+              groundingMetadata,
+            })
+          });
+          const dataAi = await resAi.json().catch(() => ({}));
+          if (dataAi?.id) {
+            setMessages(prev => {
+              const newMsg = [...prev];
+              if (newMsg[newMsg.length - 1]) newMsg[newMsg.length - 1].id = dataAi.id;
+              return newMsg;
+            });
+          }
+          if (auth.currentUser) {
+            saveMessageToFirestore(activeSessionId, {
+              id: dataAi?.id || `ai_${Date.now()}`,
+              role: 'model',
+              content: aiResponseContent,
+            }).catch(console.error);
+          }
+        }
+        return;
+      }
+
+      // If Council Mode is toggled ON or auto-detected from user prompt, run the 3-Expert Council Debate
+      if (autoTriggerCouncil) {
         try {
           finalCouncilDebate = await runCouncilDebate(originalInput, contextMessages);
           setMessages((prev) => {
@@ -1619,6 +2237,27 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           });
         } catch (err) {
           console.error('Council auto-debate error:', err);
+        }
+      }
+
+      // Self-Improving AI: Zero-Quota Post-Turn 4-Axis Telemetry & Meta-Rule Evolution
+      let postTurnEvaluation: any = undefined;
+      if (settings.selfImprovementMode !== false) {
+        const { evaluation, newEvolvedRule } = evaluateAndEvolveTurnLocally(
+          originalInput,
+          aiResponseContent,
+          settings.evolvedRules || DEFAULT_EVOLVED_RULES
+        );
+        postTurnEvaluation = evaluation;
+        if (newEvolvedRule) {
+          setSettings((prev) => ({
+            ...prev,
+            evolvedRules: [newEvolvedRule, ...(prev.evolvedRules || DEFAULT_EVOLVED_RULES)],
+          }));
+          showFolderToast(
+            `Self-Improving AI distilled new rule: "${newEvolvedRule.rule.slice(0, 56)}..."`,
+            'info'
+          );
         }
       }
 
@@ -1632,14 +2271,18 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           content: aiResponseContent,
           groundingMetadata,
           councilDebate: finalCouncilDebate,
-          deepResearch: finalDeepResearch
+          deepResearch: finalDeepResearch,
+          selfEvaluation: postTurnEvaluation
         })
       });
-      const dataAi = await resAi.json();
+      const dataAi = await resAi.json().catch(() => ({} as any));
       setMessages(prev => {
         const newMsg = [...prev];
         if (newMsg[newMsg.length - 1]) {
-          newMsg[newMsg.length - 1].id = dataAi.id;
+          if (dataAi?.id) newMsg[newMsg.length - 1].id = dataAi.id;
+          if (postTurnEvaluation) {
+            newMsg[newMsg.length - 1].selfEvaluation = postTurnEvaluation;
+          }
         }
         return newMsg;
       });
@@ -1651,60 +2294,78 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         }).catch(console.error);
       }
 
-      // Asynchronously generate follow-up questions & intent alignment check
-      generateFollowUpAndAlignment(originalInput, aiResponseContent).then(alignRes => {
-        if (alignRes) {
-          setMessages(prev => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last && last.role === 'model') {
-              last.followUpQuestions = alignRes.followUps;
-              last.intentAlignment = alignRes.intentAlignment;
+      // Asynchronously generate follow-up questions & intent alignment check (skipped in Single-Call Economy or Free Tier Lock mode)
+      if (!shouldSkipAuxCalls) {
+        generateFollowUpAndAlignment(originalInput, aiResponseContent).then(alignRes => {
+          if (alignRes) {
+            setMessages(prev => {
+              const updated = [...prev];
+              const target =
+                (dataAi?.id ? updated.find(m => m.id === dataAi.id) : undefined) ||
+                updated[updated.length - 1];
+              if (target && target.role === 'model') {
+                target.followUpQuestions = alignRes.followUps;
+                target.intentAlignment = alignRes.intentAlignment;
+              }
+              return updated;
+            });
+
+            if (dataAi?.id) {
+              fetch(`/api/messages/${dataAi.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  followUpQuestions: alignRes.followUps,
+                  intentAlignment: alignRes.intentAlignment
+                })
+              }).catch(console.error);
             }
-            return updated;
-          });
-
-          if (dataAi?.id) {
-            fetch(`/api/messages/${dataAi.id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                followUpQuestions: alignRes.followUps,
-                intentAlignment: alignRes.intentAlignment
-              })
-            }).catch(console.error);
           }
-        }
-      }).catch(console.error);
+        }).catch(console.error);
+      }
 
-      // Self-Improving AI: Zero-Quota Post-Turn 4-Axis Telemetry & Meta-Rule Evolution
-      if (settings.selfImprovementMode !== false) {
-        const { evaluation, newRule } = evaluateAndEvolveTurnLocally(
-          originalInput,
-          aiResponseContent,
-          settings.evolvedRules || DEFAULT_EVOLVED_RULES
-        );
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last && last.role === 'model') {
-            last.selfEvaluation = evaluation;
-          }
-          return updated;
-        });
-        if (newRule) {
-          setSettings((prev) => ({
-            ...prev,
-            evolvedRules: [newRule, ...(prev.evolvedRules || DEFAULT_EVOLVED_RULES)],
-          }));
-          showFolderToast(
-            `Self-Improved AI đã tự đúc kết quy tắc mới: "${newRule.rule.slice(0, 56)}..."`,
-            'info'
-          );
+      // Automatically generate a descriptive title using the model after the first user-AI turn and replace 'Chat X'
+      if (activeSessionId && aiResponseContent.trim()) {
+        const currentSessObj = sessions.find((s) => s.id === activeSessionId);
+        const hasPlaceholderTitle =
+          !currentSessObj ||
+          /^(Chat \d+|New Chat|New Conversation)$/i.test(currentSessObj.name.trim());
+
+        if (isFirstTurnInSession || hasPlaceholderTitle) {
+          synthesizeAutonomousSessionMeta(originalInput, aiResponseContent, folders)
+            .then(({ title: smartTitle, matchedFolderId }) => {
+              const targetSess = sessions.find((s) => s.id === activeSessionId);
+              const nextFolderId = targetSess?.folder_id || matchedFolderId || null;
+              const finalTitle = smartTitle || conciseTitle;
+
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.id === activeSessionId
+                    ? { ...s, name: finalTitle, folder_id: nextFolderId }
+                    : s
+                )
+              );
+
+              fetch(`/api/sessions/${encodeURIComponent(activeSessionId!)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: finalTitle, folder_id: nextFolderId }),
+              }).catch(console.error);
+
+              if (auth.currentUser) {
+                saveSessionToFirestore({
+                  id: activeSessionId!,
+                  name: finalTitle,
+                  folderId: nextFolderId,
+                  isPinned: Boolean(targetSess?.is_pinned),
+                }).catch(console.error);
+              }
+            })
+            .catch(console.error);
         }
       }
 
-      // Auto-Distill Turn into Long-Term Memory ("Nhớ") & Structured Notebook ("Sổ tay")
+      // Auto-Distill Turn into Long-Term Memory & Structured Notebook
       if ((autoMemoryEnabled || autoNotesEnabled) && userId) {
         const { newMemories, autoNote } = distillTurnIntoMemoryAndNote(
           originalInput,
@@ -1729,7 +2390,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             .then(() => {
               fetchMemory();
               showFolderToast(
-                `Đã tự động ghi nhớ: ${newMemories.map((m) => `${m.key}`).join(', ')}`,
+                `Auto-memorized: ${newMemories.map((m) => `${m.key}`).join(', ')}`,
                 'info'
               );
             })
@@ -1748,7 +2409,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           })
             .then(() => {
               fetchNotes();
-              showFolderToast(`Đã tự động tóm tắt vào Sổ tay: "${autoNote.title}"`, 'info');
+              showFolderToast(`Summarized to notebook: "${autoNote.title}"`, 'info');
             })
             .catch(() => {});
         }
@@ -1757,9 +2418,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       // Auto detect and show artifact if any
       const artifact = extractArtifacts(aiResponseContent);
       if (artifact) {
-        const title = artifact.type === 'mermaid' 
-          ? `Sơ đồ Mermaid / Mindmap - ${new Date().toLocaleTimeString()}`
-          : artifact.type === 'html'
+        const title =
+          artifact.type === 'latex'
+            ? `Academic LaTeX Manuscript - ${new Date().toLocaleTimeString()}`
+            : artifact.type === 'mermaid'
+            ? `Mermaid Diagram / Mindmap - ${new Date().toLocaleTimeString()}`
+            : artifact.type === 'html'
             ? `Web App Artifact - ${new Date().toLocaleTimeString()}`
             : `Vector SVG - ${new Date().toLocaleTimeString()}`;
         setActiveArtifact({ ...artifact, title, messageIndex: messages.length + 1 });
@@ -1768,15 +2432,44 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         setIsWorkspaceOpen(true);
       }
       setAttachedContexts([]);
+
+      // If user asked AI to synthesize/write AND save to Note or export to Word/PDF, auto-trigger upon completion
+      if (wantsSaveToNote && aiResponseContent.trim()) {
+        await quickSaveNoteFromMessage(aiResponseContent, originalInput);
+      }
+      if ((wantsWordExport || wantsPdfExport) && aiResponseContent.trim()) {
+        const exportTitle =
+          sessions.find((s) => s.id === activeSessionId)?.name ||
+          originalInput.trim().slice(0, 50) ||
+          'Atelier AI Report';
+        const exportHtml = `
+          <div class="paper-header">
+            <h1>${exportTitle}</h1>
+            <div class="paper-date">${new Date().toLocaleDateString('vi-VN')}</div>
+          </div>
+          <div>${convertMarkdownWithMathToHtml(aiResponseContent)}</div>
+        `;
+        if (wantsWordExport) {
+          downloadWordDoc(exportTitle, exportTitle, exportHtml);
+          showFolderToast('Automatically exported generated response to Word (.doc)', 'success');
+        } else if (wantsPdfExport) {
+          triggerCleanPdfPrint(exportTitle, exportHtml, false);
+          showFolderToast('Automatically opened PDF print view for generated response', 'success');
+        }
+      }
       
       if (isAutoSpeak) {
         speakText(aiResponseContent);
       }
 
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      if (error?.name !== 'AbortError' && !abortControllerRef.current?.signal?.aborted) {
+        console.error(error);
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+      fetchFinopsTelemetry();
     }
   };
 
@@ -1788,10 +2481,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
   const exportChat = (format: 'pdf' | 'word' | 'md' = 'md') => {
     const sessionTitle =
-      sessions.find((s) => s.id === currentSessionId)?.name || `Hội thoại Atelier AI`;
+      sessions.find((s) => s.id === currentSessionId)?.name || `Atelier AI Conversation`;
     if (format === 'md') {
       const content = messages
-        .map((m) => `### ${m.role === 'user' ? 'Người dùng' : 'Atelier AI'}\n\n${m.content}`)
+        .map((m) => `### ${m.role === 'user' ? 'User' : 'Atelier AI'}\n\n${m.content}`)
         .join('\n\n---\n\n');
       const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -1804,7 +2497,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       const bodyHtml = `
         <div class="paper-header">
           <h1>${sessionTitle}</h1>
-          <div class="paper-date">Xuất bản từ Atelier AI Studio • ${new Date().toLocaleString('vi-VN')}</div>
+          <div class="paper-date">Published from Atelier AI Studio • ${new Date().toLocaleString('vi-VN')}</div>
         </div>
         ${messages
           .map(
@@ -1813,7 +2506,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             <div style="font-weight: bold; font-size: 10.5pt; color: ${
               m.role === 'user' ? '#78350f' : '#0f172a'
             }; margin-bottom: 4pt; text-transform: uppercase;">
-              ${m.role === 'user' ? 'Người dùng' : settings.aiIdentity?.name || 'Atelier AI'}
+              ${m.role === 'user' ? 'User' : settings.aiIdentity?.name || 'Atelier AI'}
             </div>
             <div>${convertMarkdownWithMathToHtml(m.content)}</div>
           </div>`
@@ -1831,9 +2524,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
   const handleSearch = async () => {
     if (!searchQuery.trim() || !userId) return;
-    const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&userId=${encodeURIComponent(userId)}`);
-    const results = await res.json();
-    setSearchResults(results);
+    const results = await safeFetchJson<any[]>(`/api/search?q=${encodeURIComponent(searchQuery)}&userId=${encodeURIComponent(userId)}`, undefined, []);
+    setSearchResults(Array.isArray(results) ? results : []);
   };
 
   const handleLogin = () => {
@@ -1849,10 +2541,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       const displayId = formatCompactUserName(fbUser.email || fbUser.uid, fbUser);
       localStorage.setItem('chat_user_id', displayId);
       setUserId(displayId);
-      showFolderToast(`Đã kết nối Google Cloud (${displayId})`);
+      showFolderToast(`Connected to Google Cloud (${displayId})`);
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      showFolderToast('Đăng nhập Google không thành công hoặc đã bị hủy', 'info');
+      showFolderToast('Google sign-in was cancelled or failed', 'info');
     }
   };
 
@@ -1860,28 +2552,26 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
     if (reflexionLoadingIndex !== null) return;
     const targetMsg = messages[msgIndex];
     if (!targetMsg || targetMsg.role !== 'model') return;
-    const userPrompt = messages[msgIndex - 1]?.content || 'Yêu cầu chuyên sâu của người dùng';
+    const userPrompt = messages[msgIndex - 1]?.content || 'User prompt';
 
     setReflexionLoadingIndex(msgIndex);
     try {
       const res = await runReflexionSelfRefineWithAI(userPrompt, targetMsg.content);
+      const evalScore = res.evaluation.overallScore;
+      const refinedSelfEvaluation = {
+        ...res.evaluation,
+        critique: res.evaluation.weaknesses?.join('; ') || 'Reflexion optimization complete',
+        learnedLesson: res.evolvedRule.rule,
+        wasRefined: true,
+        originalDraft: targetMsg.content
+      };
       setMessages((prev) => {
         const updated = [...prev];
         if (updated[msgIndex]) {
           updated[msgIndex] = {
             ...updated[msgIndex],
-            content: res.improvedResponse,
-            selfEvaluation: {
-              overallScore: res.improvedScore,
-              accuracyScore: Math.min(100, res.improvedScore + 1),
-              depthScore: res.improvedScore,
-              clarityScore: res.improvedScore,
-              alignmentScore: Math.min(100, res.improvedScore + 2),
-              critique: res.critique,
-              learnedLesson: res.extractedMetaRule.rule,
-              wasRefined: true,
-              originalDraft: targetMsg.content
-            }
+            content: res.refinedResponse,
+            selfEvaluation: refinedSelfEvaluation
           };
         }
         return updated;
@@ -1889,26 +2579,29 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
       setSettings((prev) => {
         const currentRules = prev.evolvedRules || DEFAULT_EVOLVED_RULES;
         const exists = currentRules.some(
-          (r) => r.rule.toLowerCase() === res.extractedMetaRule.rule.toLowerCase()
+          (r) => r.rule.toLowerCase() === res.evolvedRule.rule.toLowerCase()
         );
         return {
           ...prev,
-          evolvedRules: exists ? currentRules : [res.extractedMetaRule, ...currentRules]
+          evolvedRules: exists ? currentRules : [res.evolvedRule, ...currentRules]
         };
       });
       if (targetMsg.id) {
         await fetch(`/api/messages/${targetMsg.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: res.improvedResponse })
+          body: JSON.stringify({
+            content: res.refinedResponse,
+            selfEvaluation: refinedSelfEvaluation
+          })
         }).catch(() => {});
       }
       showFolderToast(
-        `Reflexion V2 hoàn tất (${res.originalScore}% → ${res.improvedScore}%) & đã nạp quy tắc mới vào Layer 6!`
+        `Reflexion V2 complete (${evalScore}%) & saved new rule to Layer 6!`
       );
     } catch (err) {
       console.error('Reflexion error:', err);
-      showFolderToast('Không thể chạy Reflexion lúc này', 'info');
+      showFolderToast('Unable to run Reflexion at this time', 'info');
     } finally {
       setReflexionLoadingIndex(null);
     }
@@ -1924,109 +2617,86 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
     setSessions([]);
   };
 
-  const isEditorial = theme === 'editorial' || theme === 'botanical';
-  const isMidnight = theme === 'midnight' || theme === 'aurora';
-  const activeThemeInfo = THEMES_LIST.find(t => t.id === theme) || THEMES_LIST[0];
+  const isEditorial = theme === 'editorial' || theme === 'light';
+  const isMidnight = false;
+  const activeThemeInfo = THEMES_LIST.find(t => t.id === theme) || (isEditorial ? THEMES_LIST[0] : THEMES_LIST[1]);
 
   if (!userId) {
     return (
       <div 
-        data-theme={theme}
+        data-theme={isEditorial ? 'editorial' : 'dark'}
         className={cn(
           "h-screen flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-200",
-          isEditorial ? "bg-[#fbfaf8] text-[#1e1d1b]" : isMidnight ? "bg-[#0a0e17] text-[#e6edf8]" : "bg-[#0f1012] text-[#f2f1ee]"
+          isEditorial ? "bg-[#fafafa] text-[#18181b]" : "bg-[#09090b] text-[#f4f4f5]"
         )}
       >
-        {/* Subtle Ambient Background */}
-        <div className="absolute inset-0 pointer-events-none opacity-40">
-          <div className={cn(
-            "w-[600px] h-[600px] rounded-full blur-[140px] absolute -top-40 -left-40",
-            isEditorial ? "bg-amber-200/50" : isMidnight ? "bg-sky-900/30" : "bg-blue-900/20"
-          )} />
-          <div className={cn(
-            "w-[500px] h-[500px] rounded-full blur-[130px] absolute -bottom-32 -right-32",
-            isEditorial ? "bg-orange-100/60" : isMidnight ? "bg-indigo-900/30" : "bg-violet-900/20"
-          )} />
-        </div>
-
-        {/* Floating Theme Switcher on Login */}
+        {/* Minimalist Light / Dark Switcher on Login */}
         <div className={cn(
-          "absolute top-5 right-5 flex items-center gap-1 p-1 rounded-xl border backdrop-blur-md z-20 shadow-xs",
-          isEditorial ? "bg-white/85 border-[#e6e2d8]" : isMidnight ? "bg-[#101624]/85 border-[#22304d]" : "bg-[#16171a]/85 border-[#272930]"
+          "absolute top-5 right-5 flex items-center gap-1 p-1 rounded-xl border z-20",
+          isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
         )}>
           <button 
+            type="button"
             onClick={() => setTheme('editorial')}
-            className={cn("px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all", isEditorial ? "bg-[#f0ebe1] text-[#b45309] shadow-xs" : "opacity-60 hover:opacity-100")}
-            title="Giao diện Giấy ngà (Editorial Warm)"
+            className={cn(
+              "px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors",
+              isEditorial ? "bg-[#f4f4f5] text-[#18181b] font-semibold" : "opacity-60 hover:opacity-100"
+            )}
+            title="Light Mode"
           >
             <Sun size={12} />
-            <span className="hidden sm:inline">Giấy ngà</span>
+            <span>Light</span>
           </button>
           <button 
+            type="button"
             onClick={() => setTheme('dark')}
-            className={cn("px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all", theme === 'dark' ? "bg-[#252830] text-blue-400 shadow-xs" : "opacity-60 hover:opacity-100")}
-            title="Giao diện Tối giản (Obsidian Dark)"
+            className={cn(
+              "px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors",
+              !isEditorial ? "bg-[#27272a] text-[#f4f4f5] font-semibold" : "opacity-60 hover:opacity-100"
+            )}
+            title="Dark Mode"
           >
             <Moon size={12} />
-            <span className="hidden sm:inline">Tối giản</span>
-          </button>
-          <button 
-            onClick={() => setTheme('midnight')}
-            className={cn("px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all", isMidnight ? "bg-[#1d2942] text-sky-300 shadow-xs" : "opacity-60 hover:opacity-100")}
-            title="Giao diện Phiến đá (Nordic Midnight)"
-          >
-            <Palette size={12} />
-            <span className="hidden sm:inline">Phiến đá</span>
+            <span>Dark</span>
           </button>
         </div>
 
         <motion.div 
-          initial={{ scale: 0.96, opacity: 0, y: 10 }}
+          initial={{ scale: 0.98, opacity: 0, y: 8 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.25 }}
           className={cn(
-            "w-full max-w-[400px] p-8 sm:p-9 space-y-6 relative z-10 rounded-2xl border backdrop-blur-xl atelier-shadow-lg",
-            isEditorial ? "bg-white border-[#e6e2d8]" : isMidnight ? "bg-[#101624] border-[#22304d]" : "bg-[#151619] border-[#272930]"
+            "w-full max-w-[390px] p-8 space-y-6 relative z-10 rounded-2xl border",
+            isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
           )}
         >
-          <div className="text-center space-y-2.5">
-            <div className={cn(
-              "w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-md border",
-              isEditorial ? "bg-amber-500/10 text-amber-700 border-amber-200" : isMidnight ? "bg-sky-500/15 text-sky-300 border-sky-400/20" : "bg-blue-500/15 text-blue-400 border-blue-400/20"
-            )}>
-              <Sparkles size={22} />
-            </div>
-            
-            <div className="space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight">
-                Atelier AI
-              </h1>
-              <p className={cn("text-xs font-medium tracking-wide", isEditorial ? "text-amber-800/80" : "text-sky-400")}>
-                Studio Nhận thức & Sáng tạo Chuyên sâu
-              </p>
-            </div>
-            
-            <p className={cn("text-xs leading-relaxed max-w-xs mx-auto", isEditorial ? "text-[#736e65]" : "text-[#9498a4]")}>
-              Không gian làm việc đồng hành cùng Hội đồng 3 chuyên gia phản biện, Nghiên cứu sâu đa tầng & Đồ thị tri thức.
+          <div className="text-center space-y-3 flex flex-col items-center">
+            <AtelierLogo
+              size="lg"
+              showWordmark={true}
+              isEditorial={isEditorial}
+            />
+            <p className={cn("text-xs leading-relaxed max-w-xs mx-auto", isEditorial ? "text-[#52525b]" : "text-[#a1a1aa]")}>
+              Minimalist cognitive workspace with AI Council debates, Deep Research & Knowledge Graph.
             </p>
           </div>
 
-          <div className="space-y-3.5 pt-2">
+          <div className="space-y-3.5 pt-1">
             <div className="space-y-1.5">
-              <label className={cn("text-xs font-medium block px-0.5", isEditorial ? "text-[#4d483f]" : "text-slate-300")}>
-                Định danh Không gian làm việc
+              <label className={cn("text-xs font-medium block px-0.5", isEditorial ? "text-[#3f3f46]" : "text-[#d4d4d8]")}>
+                Workspace Identifier
               </label>
               <input 
                 type="text" 
-                placeholder="Nhập tên hoặc bí danh của bạn..."
+                placeholder="Enter your name or alias..."
                 value={tempUserId}
                 onChange={(e) => setTempUserId(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                 className={cn(
-                  "w-full rounded-xl px-3.5 py-2.5 text-xs focus:outline-none transition-all border",
+                  "w-full rounded-xl px-3.5 py-2.5 text-xs focus:outline-none transition-colors border",
                   isEditorial 
-                    ? "bg-[#faf8f5] border-[#e6e2d8] focus:border-amber-600 focus:bg-white text-[#1e1d1b] placeholder-[#a09a8f]"
-                    : "bg-[#0b0e14] border-white/10 focus:border-blue-500 text-white placeholder-slate-500"
+                    ? "bg-[#fafafa] border-[#e4e4e7] focus:border-[#18181b] focus:bg-white text-[#18181b] placeholder-[#71717a]"
+                    : "bg-[#09090b] border-[#27272a] focus:border-[#71717a] text-[#f4f4f5] placeholder-[#71717a]"
                 )}
                 autoFocus
               />
@@ -2036,21 +2706,19 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               onClick={handleLogin}
               disabled={!tempUserId.trim()}
               className={cn(
-                "w-full text-xs font-semibold py-2.5 rounded-xl transition-all shadow-sm active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed",
+                "w-full text-xs font-semibold py-2.5 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
                 isEditorial 
-                  ? "bg-[#24211d] hover:bg-[#36322c] text-white" 
-                  : isMidnight
-                  ? "bg-sky-600 hover:bg-sky-500 text-white"
-                  : "bg-blue-600 hover:bg-blue-500 text-white"
+                  ? "bg-[#18181b] hover:bg-[#27272a] text-white" 
+                  : "bg-[#f4f4f5] hover:bg-[#e4e4e7] text-[#09090b]"
               )}
             >
-              Bắt đầu Không gian làm việc
+              Enter Workspace
             </button>
 
             <div className="relative flex py-1 items-center">
               <div className="flex-grow border-t border-current/10" />
               <span className="flex-shrink mx-2 text-[10px] uppercase tracking-wider opacity-50 font-mono">
-                Hoặc đồng bộ Đám mây
+                Or sync with Cloud
               </span>
               <div className="flex-grow border-t border-current/10" />
             </div>
@@ -2059,14 +2727,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               type="button"
               onClick={handleGoogleSignIn}
               className={cn(
-                "w-full text-xs font-semibold py-2.5 px-4 rounded-xl transition-all border flex items-center justify-center gap-2 shadow-2xs",
+                "w-full text-xs font-medium py-2.5 px-4 rounded-xl transition-colors border flex items-center justify-center gap-2",
                 isEditorial
-                  ? "bg-white hover:bg-[#f7f5ef] border-[#ded7ca] text-[#1e1d1b]"
-                  : "bg-white/10 hover:bg-white/15 border-white/15 text-white"
+                  ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                  : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
               )}
             >
-              <Cloud size={14} className="text-sky-400" />
-              <span>Đăng nhập với Google (Firebase Firestore)</span>
+              <Cloud size={14} className="opacity-70" />
+              <span>Sign in with Google</span>
             </button>
           </div>
         </motion.div>
@@ -2078,266 +2746,251 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
     <div 
       data-theme={theme}
       className={cn(
-        "flex h-screen overflow-hidden selection:bg-amber-500/20 transition-colors duration-200",
-        isEditorial ? "bg-[#fbfaf8] text-[#1e1d1b]" : isMidnight ? "bg-[#0a0e17] text-[#e6edf8]" : "bg-[#0f1012] text-[#f2f1ee]"
+        "flex h-[100dvh] w-full overflow-hidden transition-colors duration-200 relative",
+        isEditorial ? "bg-[#fafafa] text-[#18181b]" : "bg-[#09090b] text-[#f4f4f5]"
       )}
     >
-      {/* Atelier Clean Sidebar */}
+      {/* Mobile Sidebar Backdrop Overlay */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-black/55 backdrop-blur-[2px] z-40 md:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Minimalist Neutral Sidebar */}
       <motion.aside 
         initial={false}
-        animate={{ width: isSidebarOpen ? 276 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1.0] }}
+        animate={{ width: isSidebarOpen ? 268 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+        transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1.0] }}
         className={cn(
-          "flex flex-col relative z-20 h-full shrink-0 min-w-0 overflow-hidden select-none transition-colors",
+          "flex flex-col max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 md:relative md:z-20 h-full shrink-0 min-w-0 overflow-hidden select-none transition-colors shadow-2xl md:shadow-none",
           isSidebarOpen ? "border-r" : "border-r-0 border-transparent pointer-events-none",
-          isEditorial ? "bg-[#f5f3ee] border-[#e6e2d8]" : isMidnight ? "bg-[#0d131f] border-[#1c273e]" : "bg-[#141518] border-[#24262c]"
+          isEditorial ? "bg-[#f4f4f5] border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
         )}
       >
-        <div className="w-[276px] h-full flex flex-col shrink-0">
-        {/* Sidebar Brand Header (Height 56px - perfectly aligned with main header h-14) */}
+        <div className="w-[268px] h-full flex flex-col shrink-0">
+        {/* Sidebar Brand Header */}
         <div className={cn(
-          "h-14 px-4 flex items-center justify-between border-b shrink-0",
-          isEditorial ? "border-[#e6e2d8]" : isMidnight ? "border-[#1c273e]" : "border-[#24262c]"
+          "h-13 px-3 flex items-center justify-between border-b shrink-0",
+          isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]"
         )}>
-          <div className="flex items-center gap-2.5">
-            <div className={cn(
-              "w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm shadow-xs border shrink-0",
-              isEditorial 
-                ? "bg-amber-500/15 text-amber-800 border-amber-300/60" 
-                : isMidnight 
-                ? "bg-sky-500/20 text-sky-300 border-sky-400/30" 
-                : "bg-blue-500/20 text-blue-400 border-blue-400/30"
-            )}>
-              A
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-bold text-base tracking-tight">Atelier AI</span>
-              <span className={cn(
-                "text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold",
-                isEditorial ? "bg-[#ebe4d6] text-[#736e65]" : "bg-white/10 text-slate-300"
-              )}>
-                Studio
-              </span>
-            </div>
+          <AtelierLogo
+            size="sm"
+            isEditorial={isEditorial}
+          />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                createNewSession();
+                if (currentView !== 'chat') setCurrentView('chat');
+                setSidebarNavMode('chats');
+                setSidebarSection('chats');
+                if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                  setIsSidebarOpen(false);
+                }
+              }}
+              className={cn(
+                "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors",
+                isEditorial 
+                  ? "text-[#52525b] hover:text-[#18181b] hover:bg-black/5" 
+                  : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-white/10"
+              )}
+              title="New Conversation (⌘N)"
+              aria-label="New Conversation"
+            >
+              <SquarePen size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className={cn(
+                "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors",
+                isEditorial ? "text-[#52525b] hover:bg-black/5" : "text-[#a1a1aa] hover:text-white hover:bg-white/10"
+              )}
+              title="Close Sidebar"
+              aria-label="Close Sidebar"
+            >
+              <X size={16} />
+            </button>
           </div>
         </div>
 
-        {/* Sidebar Action & Navigation Deck */}
+        {/* Unified 3-Mode Primary Navigation Segment */}
         <div className={cn(
-          "p-3 space-y-2.5 border-b",
-          isEditorial ? "border-[#e6e2d8]" : isMidnight ? "border-[#1c273e]" : "border-[#24262c]"
+          "px-3 py-2 border-b shrink-0",
+          isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]"
         )}>
-          <button 
-            onClick={() => {
-              createNewSession();
-              if (currentView !== 'chat') setCurrentView('chat');
-            }}
-            className={cn(
-              "flex items-center justify-between w-full h-9 px-3 rounded-xl transition-all text-xs font-medium shadow-xs group active:scale-[0.99]",
-              isEditorial 
-                ? "bg-[#23201d] hover:bg-[#34302a] text-white" 
-                : isMidnight
-                ? "bg-sky-600 hover:bg-sky-500 text-white"
-                : "bg-blue-600 hover:bg-blue-500 text-white"
-            )}
-          >
-            <span className="flex items-center gap-2">
-              <Plus size={14} className="shrink-0 transition-transform duration-200 group-hover:rotate-90" />
-              <span>Hội thoại mới</span>
-            </span>
-            <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/20 text-white/80">
-              ⌘N
-            </kbd>
-          </button>
-
-          {/* 4-Segment Sidebar Navigation (Horizontal Icon + Label for perfect alignment) */}
           <div className={cn(
-            "grid grid-cols-4 gap-1 p-1 rounded-xl border",
-            isEditorial ? "bg-[#edeae2] border-[#e2ddd3]" : isMidnight ? "bg-[#090d15] border-[#172134]" : "bg-[#0b0c0e] border-[#1d1f24]"
+            "grid grid-cols-3 gap-1 p-1 rounded-xl border items-center",
+            isEditorial ? "bg-[#e4e4e7]/60 border-[#e4e4e7]" : "bg-[#09090b] border-[#27272a]"
           )}>
-            {[
-              { id: 'chats', icon: MessageSquare, label: 'Chat', count: sessions.length },
-              { id: 'memory', icon: Brain, label: 'Nhớ', count: memory.length },
-              { id: 'documents', icon: FileText, label: 'Docs', count: documents.length },
-              { id: 'notebook', icon: NotebookIcon, label: 'Notes', count: notes.length }
-            ].map(tab => {
-              const active = sidebarSection === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setSidebarSection(tab.id as any)}
-                  className={cn(
-                    "h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-[11px] font-medium shrink-0",
-                    active
-                      ? isEditorial 
-                        ? "bg-white text-[#1e1d1b] font-semibold shadow-xs" 
-                        : "bg-[#20232c] text-white font-medium shadow-xs"
-                      : isEditorial 
-                        ? "text-[#7a756b] hover:text-[#1e1d1b]" 
-                        : "text-[#8a8f9d] hover:text-slate-200"
-                  )}
-                  title={tab.label}
-                >
-                  <tab.icon size={12} className={cn("shrink-0", active ? (isEditorial ? "text-amber-700" : "text-blue-400") : "opacity-70")} />
-                  <span className="truncate">{tab.label}</span>
-                </button>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => {
+                setSidebarNavMode('chats');
+                setSidebarSection('chats');
+                if (currentView !== 'chat') setCurrentView('chat');
+              }}
+              className={cn(
+                "w-full min-w-0 h-7 rounded-lg flex items-center justify-center gap-1.5 px-2 text-[11.5px] font-medium transition-colors relative select-none",
+                sidebarNavMode === 'chats'
+                  ? isEditorial
+                    ? "bg-white text-[#18181b] font-semibold shadow-2xs"
+                    : "bg-[#27272a] text-[#f4f4f5] font-semibold"
+                  : isEditorial
+                  ? "text-[#52525b] hover:text-[#18181b]"
+                  : "text-[#a1a1aa] hover:text-[#f4f4f5]"
+              )}
+              title="Conversation list"
+            >
+              <MessageSquare size={12} className={cn("shrink-0", sidebarNavMode === 'chats' ? (isEditorial ? "text-indigo-600" : "text-sky-400") : "opacity-75")} />
+              <span className="truncate">Chats</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSidebarNavMode('studios')}
+              className={cn(
+                "w-full min-w-0 h-7 rounded-lg flex items-center justify-center gap-1.5 px-2 text-[11.5px] font-medium transition-colors relative select-none",
+                sidebarNavMode === 'studios'
+                  ? isEditorial
+                    ? "bg-white text-[#18181b] font-semibold shadow-2xs"
+                    : "bg-[#27272a] text-[#f4f4f5] font-semibold"
+                  : isEditorial
+                  ? "text-[#52525b] hover:text-[#18181b]"
+                  : "text-[#a1a1aa] hover:text-[#f4f4f5]"
+              )}
+              title="Specialized Studios (3D Bioscience, Batch Queue, Self-Evolving...)"
+            >
+              <Layers size={12} className={cn("shrink-0", sidebarNavMode === 'studios' ? (isEditorial ? "text-cyan-600" : "text-cyan-400") : "opacity-75")} />
+              <span className="truncate">Studios</span>
+              {batchQueue.runningCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse pointer-events-none" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSidebarNavMode('knowledge');
+                if (sidebarSection === 'chats') setSidebarSection('memory');
+              }}
+              className={cn(
+                "w-full min-w-0 h-7 rounded-lg flex items-center justify-center gap-1.5 px-2 text-[11.5px] font-medium transition-colors relative select-none",
+                sidebarNavMode === 'knowledge'
+                  ? isEditorial
+                    ? "bg-white text-[#18181b] font-semibold shadow-2xs"
+                    : "bg-[#27272a] text-[#f4f4f5] font-semibold"
+                  : isEditorial
+                  ? "text-[#52525b] hover:text-[#18181b]"
+                  : "text-[#a1a1aa] hover:text-[#f4f4f5]"
+              )}
+              title="Knowledge Base: AI Memory, Documents & Notebook"
+            >
+              <Brain size={12} className={cn("shrink-0", sidebarNavMode === 'knowledge' ? (isEditorial ? "text-violet-600" : "text-violet-400") : "opacity-75")} />
+              <span className="truncate">Knowledge</span>
+            </button>
           </div>
         </div>
 
-        {/* Chats List with Quick Search, Category Folders & Accordion */}
-        {sidebarSection === 'chats' && (
+        {/* 1. Chats List Mode */}
+        {sidebarNavMode === 'chats' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Search & Folder Toolbar */}
+            {/* Streamlined Search & Folder Toolbar */}
             <div className={cn(
-              "px-3 pt-2.5 pb-2 border-b space-y-2 shrink-0",
-              isEditorial ? "bg-[#f8f6f0] border-[#e6e2d8]" : isMidnight ? "bg-[#0b101b] border-[#172236]" : "bg-[#11131a] border-white/5"
+              "px-3 py-2 border-b space-y-1.5 shrink-0",
+              isEditorial ? "bg-[#f4f4f5] border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
             )}>
-              {/* Quick Search Input */}
-              <div className="relative flex items-center">
-                <Search size={12} className={cn("absolute left-2.5 pointer-events-none", isEditorial ? "text-[#8a8376]" : "text-slate-500")} />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Tìm hội thoại hoặc tin nhắn..."
-                  className={cn(
-                    "w-full h-7 pl-7 pr-6 rounded-lg text-xs border focus:outline-none transition-colors",
-                    isEditorial
-                      ? "bg-white border-[#ded7ca] text-[#1e1d1b] placeholder-[#9a9386] focus:border-amber-600/60"
-                      : isMidnight
-                      ? "bg-[#090d16] border-[#1c2840] text-white placeholder-slate-500 focus:border-sky-500/50"
-                      : "bg-[#0b0d12] border-white/10 text-white placeholder-slate-500 focus:border-blue-500/50"
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1 flex items-center">
+                  <Search size={12} className={cn("absolute left-2.5 pointer-events-none", isEditorial ? "text-[#71717a]" : "text-[#71717a]")} />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search conversations..."
+                    className={cn(
+                      "w-full h-7 pl-7 pr-6 rounded-lg text-xs border focus:outline-none transition-colors",
+                      isEditorial
+                        ? "bg-white border-[#e4e4e7] text-[#18181b] placeholder-[#71717a] focus:border-[#71717a]"
+                        : "bg-[#09090b] border-[#27272a] text-[#f4f4f5] placeholder-[#71717a] focus:border-[#52525b]"
+                    )}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 opacity-60 hover:opacity-100 transition-opacity"
+                      title="Clear search"
+                    >
+                      <X size={11} />
+                    </button>
                   )}
-                />
-                {searchQuery && (
+                </div>
+
+                {folders.length > 0 && (
+                  <select
+                    value={activeFolderFilter}
+                    onChange={(e) => setActiveFolderFilter(e.target.value)}
+                    className={cn(
+                      "h-7 rounded-lg px-2 text-[11px] font-medium border cursor-pointer focus:outline-none transition-colors max-w-[95px] truncate",
+                      isEditorial
+                        ? "bg-white border-[#e4e4e7] text-[#18181b]"
+                        : "bg-[#09090b] border-[#27272a] text-[#f4f4f5]"
+                    )}
+                    title="Filter by folder"
+                  >
+                    <option value="all">All ({sessions.length})</option>
+                    {folders.map(f => (
+                      <option key={f.id} value={f.id}>
+                        {f.emoji || '📁'} {f.name}
+                      </option>
+                    ))}
+                    <option value="uncategorized">Uncategorized</option>
+                  </select>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingFolder(null);
+                    setIsFolderModalOpen(true);
+                  }}
+                  className={cn(
+                    "w-7 h-7 rounded-lg border inline-flex items-center justify-center transition-colors shrink-0",
+                    isEditorial
+                      ? "bg-white hover:bg-[#fafafa] border-[#e4e4e7] text-[#52525b] hover:text-[#18181b]"
+                      : "bg-[#09090b] hover:bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-white"
+                  )}
+                  title="Manage folders"
+                >
+                  <FolderPlus size={13} />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] opacity-60 px-0.5">
+                <span>{sessions.length} conversations</span>
+                {folders.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 opacity-60 hover:opacity-100 transition-opacity"
-                    title="Xóa tìm kiếm"
+                    disabled={isAutoCategorizing}
+                    onClick={handleAutoCategorizeAll}
+                    className="inline-flex items-center gap-1 hover:opacity-100 hover:underline disabled:opacity-50"
+                    title="AI auto-classifies conversations into folders"
                   >
-                    <X size={11} />
+                    <Sparkles size={10} className={isAutoCategorizing ? "animate-spin text-amber-500" : ""} />
+                    <span>AI Auto-Sort</span>
                   </button>
                 )}
               </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <FolderIcon size={13} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-sky-400")} />
-                  <span className="font-semibold text-[11px] truncate">
-                    Thư mục ({folders.length})
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  {folders.length > 0 && (
-                    <button
-                      type="button"
-                      disabled={isAutoCategorizing}
-                      onClick={handleAutoCategorizeAll}
-                      className={cn(
-                        "h-6 px-1.5 rounded-md border text-[10px] font-medium inline-flex items-center gap-1 transition-all disabled:opacity-50",
-                        isEditorial
-                          ? "bg-white hover:bg-amber-50 text-amber-900 border-[#ded7ca]"
-                          : "bg-white/5 hover:bg-white/10 text-sky-300 border-white/10"
-                      )}
-                      title="AI Tự động xếp các cuộc trò chuyện chưa phân loại vào thư mục phù hợp"
-                    >
-                      <Sparkles size={11} className={isAutoCategorizing ? "animate-spin text-amber-500" : ""} />
-                      <span className="hidden sm:inline">AI Xếp</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingFolder(null);
-                      setIsFolderModalOpen(true);
-                    }}
-                    className={cn(
-                      "h-6 px-2 rounded-md border text-[10px] font-medium inline-flex items-center gap-1 transition-all shadow-2xs",
-                      isEditorial
-                        ? "bg-white hover:bg-amber-50 text-[#2c2824] border-[#ded7ca]"
-                        : "bg-white/5 hover:bg-white/10 text-slate-200 border-white/10"
-                    )}
-                    title="Tạo mới hoặc quản lý danh sách thư mục"
-                  >
-                    <FolderPlus size={11} className={isEditorial ? "text-amber-700" : "text-sky-400"} />
-                    <span>Quản lý</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Category Horizontal Filter Pills - Only shown when folders exist */}
-              {folders.length > 0 && (
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setActiveFolderFilter('all')}
-                    className={cn(
-                      "px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-all border",
-                      activeFolderFilter === 'all'
-                        ? isEditorial 
-                          ? "bg-white text-amber-900 border-amber-400/80 shadow-2xs font-semibold" 
-                          : "bg-white/15 text-white border-sky-400/40 shadow-2xs font-semibold"
-                        : isEditorial
-                        ? "text-[#7a7469] border-transparent hover:bg-black/5"
-                        : "text-slate-400 border-transparent hover:bg-white/5"
-                    )}
-                  >
-                    Tất cả ({sessions.length})
-                  </button>
-
-                  {folders.map(f => {
-                    const count = sessions.filter(s => s.folder_id === f.id).length;
-                    const isSelected = activeFolderFilter === f.id;
-                    return (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => setActiveFolderFilter(f.id)}
-                        className={cn(
-                          "px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-all border flex items-center gap-1",
-                          isSelected
-                            ? isEditorial 
-                              ? "bg-white text-amber-900 border-amber-400 shadow-2xs font-semibold" 
-                              : "bg-white/15 text-white border-sky-400 shadow-2xs font-semibold"
-                            : isEditorial
-                            ? "text-[#7a7469] border-transparent hover:bg-black/5"
-                            : "text-slate-400 border-transparent hover:bg-white/5"
-                        )}
-                        title={`${f.name} (${count} hội thoại)`}
-                      >
-                        <span>{f.emoji || '📁'}</span>
-                        <span className="truncate max-w-[80px]">{f.name}</span>
-                        <span className="opacity-60 text-[9px]">({count})</span>
-                      </button>
-                    );
-                  })}
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveFolderFilter('uncategorized')}
-                    className={cn(
-                      "px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-all border flex items-center gap-1",
-                      activeFolderFilter === 'uncategorized'
-                        ? isEditorial 
-                          ? "bg-white text-amber-900 border-amber-400 shadow-2xs font-semibold" 
-                          : "bg-white/15 text-white border-sky-400 shadow-2xs font-semibold"
-                        : isEditorial
-                        ? "text-[#7a7469] border-transparent hover:bg-black/5"
-                        : "text-slate-400 border-transparent hover:bg-white/5"
-                    )}
-                  >
-                    <span>Chưa xếp</span>
-                    <span className="opacity-60 text-[9px]">
-                      ({sessions.filter(s => !s.folder_id || !folders.some(f => f.id === s.folder_id)).length})
-                    </span>
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Main Scrollable Sessions View */}
@@ -2352,8 +3005,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     <Filter size={11} className="shrink-0" />
                     <span className="truncate text-[11px]">
                       {activeFolderFilter === 'uncategorized' 
-                        ? 'Đang lọc: Chưa phân loại' 
-                        : `Thư mục: ${folders.find(f => f.id === activeFolderFilter)?.emoji || '📁'} ${folders.find(f => f.id === activeFolderFilter)?.name || ''}`}
+                        ? 'Filter: Uncategorized' 
+                        : `Folder: ${folders.find(f => f.id === activeFolderFilter)?.emoji || '📁'} ${folders.find(f => f.id === activeFolderFilter)?.name || ''}`}
                     </span>
                   </div>
                   <button
@@ -2361,7 +3014,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     onClick={() => setActiveFolderFilter('all')}
                     className="text-[10px] underline font-medium shrink-0 opacity-80 hover:opacity-100"
                   >
-                    Xem tất cả
+                    View all
                   </button>
                 </div>
               )}
@@ -2385,8 +3038,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         if (isRenaming) return;
                         setCurrentSessionId(s.id);
                         if (currentView !== 'chat') setCurrentView('chat');
+                        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                          setIsSidebarOpen(false);
+                        }
                       }}
-                      onDoubleClick={(e) => handleStartRenameSession(s, e)}
                       className={cn(
                         "group flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer transition-all border relative select-none",
                         isSelected 
@@ -2441,7 +3096,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         ) : (
                           <span
                             className="truncate text-xs leading-tight"
-                            title="Nhấp đúp để đổi tên hội thoại"
+                            title={s.name}
                           >
                             {s.name}
                           </span>
@@ -2449,7 +3104,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         {!isRenaming && sessionFolder && activeFolderFilter === 'all' && (
                           <span 
                             className="text-[10px] shrink-0 opacity-70 ml-1"
-                            title={`Nằm trong thư mục: ${sessionFolder.name}`}
+                            title={`Folder: ${sessionFolder.name}`}
                           >
                             {sessionFolder.emoji}
                           </span>
@@ -2458,13 +3113,13 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
                       {/* Action buttons on Session Card */}
                       {!isRenaming && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 relative">
+                        <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0 relative">
                           {/* Rename Button */}
                           <button
                             type="button"
                             onClick={(e) => handleStartRenameSession(s, e)}
                             className="w-6 h-6 rounded inline-flex items-center justify-center text-[#878278] hover:text-amber-600 transition-colors shrink-0"
-                            title="Đổi tên hội thoại"
+                            title="Rename conversation"
                           >
                             <Edit3 size={11} />
                           </button>
@@ -2482,7 +3137,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                 ? "text-sky-500 hover:text-sky-400" 
                                 : "text-[#878278] hover:text-[#1e1d1b]"
                             )}
-                            title="Chuyển vào thư mục khác"
+                            title="Move to another folder"
                           >
                             <ArrowRightLeft size={11} />
                           </button>
@@ -2498,7 +3153,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               "w-6 h-6 rounded inline-flex items-center justify-center transition-colors shrink-0",
                               isPinned ? "text-amber-600" : "text-[#878278] hover:text-[#1e1d1b]"
                             )}
-                            title={isPinned ? "Bỏ ghim" : "Ghim lên đầu"}
+                            title={isPinned ? "Unpin" : "Pin to top"}
                           >
                             <Pin size={11} className={cn("shrink-0", isPinned ? "rotate-45" : "")} />
                           </button>
@@ -2511,7 +3166,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               deleteSession(s.id, e);
                             }}
                             className="w-6 h-6 rounded inline-flex items-center justify-center text-[#878278] hover:text-red-500 transition-colors shrink-0"
-                            title="Xóa hội thoại"
+                            title="Delete conversation"
                           >
                             <Trash2 size={11} className="shrink-0" />
                           </button>
@@ -2526,7 +3181,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               )}
                             >
                               <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider opacity-60 border-b border-current/10">
-                                Di chuyển hội thoại
+                                Move conversation
                               </div>
                               
                               <div className="max-h-40 overflow-y-auto space-y-0.5">
@@ -2541,7 +3196,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                 >
                                   <span className="flex items-center gap-1.5 truncate">
                                     <span>📁</span>
-                                    <span>Chưa phân loại</span>
+                                    <span>Uncategorized</span>
                                   </span>
                                   {!s.folder_id && <Check size={11} />}
                                 </button>
@@ -2580,7 +3235,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   className="w-full px-2 py-1 rounded-md text-[10px] font-medium text-left opacity-80 hover:opacity-100 hover:bg-white/10 flex items-center gap-1"
                                 >
                                   <Plus size={10} />
-                                  <span>Tạo thư mục mới</span>
+                                  <span>New Folder</span>
                                 </button>
                               </div>
                             </div>
@@ -2603,11 +3258,11 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           "px-2 py-1 text-[10px] font-mono uppercase tracking-wider flex items-center justify-between",
                           isEditorial ? "text-[#878278]" : "text-[#6b7280]"
                         )}>
-                          <span>Hội thoại khớp tên ({matchedByTitle.length})</span>
+                          <span>Matched conversations ({matchedByTitle.length})</span>
                         </div>
                         {matchedByTitle.length === 0 ? (
                           <div className="px-2 py-2 text-[11px] opacity-50 italic">
-                            Không có tên hội thoại nào khớp
+                            No matching conversations
                           </div>
                         ) : (
                           matchedByTitle.map(renderSessionCard)
@@ -2620,12 +3275,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             "px-2 py-1 text-[10px] font-mono uppercase tracking-wider flex items-center justify-between",
                             isEditorial ? "text-[#878278]" : "text-[#6b7280]"
                           )}>
-                            <span>Nội dung tin nhắn ({searchResults.length})</span>
+                            <span>Message content ({searchResults.length})</span>
                             {isSearchingHistory && <Loader2 size={10} className="animate-spin" />}
                           </div>
                           {searchResults.length === 0 && !isSearchingHistory ? (
                             <div className="px-2 py-2 text-[11px] opacity-50 italic">
-                              Không tìm thấy nội dung tin nhắn khớp
+                              No matching message content
                             </div>
                           ) : (
                             searchResults.slice(0, 12).map((r, idx) => (
@@ -2639,20 +3294,32 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   }
                                 }}
                                 className={cn(
-                                  "w-full text-left p-2 rounded-xl border text-xs space-y-0.5 transition-all",
+                                  "w-full text-left p-2 rounded-xl border text-xs space-y-1 transition-all",
                                   isEditorial
                                     ? "bg-white hover:bg-amber-50/60 border-[#e6e2d8] text-[#2c2824]"
                                     : "bg-[#151821] hover:bg-[#1c202c] border-white/10 text-slate-200"
                                 )}
                               >
-                                <div className={cn(
-                                  "text-[10px] font-semibold truncate",
-                                  isEditorial ? "text-amber-800" : "text-sky-400"
-                                )}>
-                                  {r.session_name || 'Hội thoại'}
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <div className={cn(
+                                    "text-[10px] font-semibold truncate",
+                                    isEditorial ? "text-amber-800" : "text-sky-400"
+                                  )}>
+                                    {r.session_name || 'Conversation'}
+                                  </div>
+                                  {typeof r.relevance_score === 'number' && (
+                                    <span className={cn(
+                                      "text-[9px] font-mono px-1.5 py-0.2 rounded shrink-0 border",
+                                      isEditorial
+                                        ? "bg-amber-50 border-amber-200 text-amber-800"
+                                        : "bg-sky-500/10 border-sky-500/25 text-sky-300"
+                                    )}>
+                                      {r.relevance_score}%
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[11px] line-clamp-2 opacity-80 leading-snug">
-                                  {r.content}
+                                  {r.matched_snippet || r.content}
                                 </div>
                               </button>
                             ))
@@ -2676,13 +3343,13 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     return (
                       <div className="text-center py-8 text-xs opacity-60 space-y-1">
                         <FolderOpen size={20} className="mx-auto mb-1 opacity-50" />
-                        <div>Chưa có hội thoại nào trong danh mục này</div>
+                        <div>No conversations in this category</div>
                         <button
                           type="button"
                           onClick={() => createNewSession(activeFolderFilter === 'uncategorized' ? null : activeFolderFilter)}
                           className="mt-2 text-[11px] underline font-medium hover:opacity-100"
                         >
-                          Bắt đầu hội thoại tại đây
+                          Start a conversation here
                         </button>
                       </div>
                     );
@@ -2707,7 +3374,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             isEditorial ? "text-[#878278]" : "text-[#6b7280]"
                           )}>
                             <span className="flex items-center gap-1 text-amber-600 font-semibold">
-                              <Pin size={10} className="rotate-45" /> Đã ghim ({pinnedSessions.length})
+                              <Pin size={10} className="rotate-45" /> Pinned ({pinnedSessions.length})
                             </span>
                           </div>
                           {pinnedSessions.map(renderSessionCard)}
@@ -2730,7 +3397,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           isEditorial ? "text-[#878278]" : "text-[#6b7280]"
                         )}>
                           <span className="flex items-center gap-1 text-amber-600 font-semibold">
-                            <Pin size={10} className="rotate-45" /> Đã ghim ({pinnedSessions.length})
+                            <Pin size={10} className="rotate-45" /> Pinned ({pinnedSessions.length})
                           </span>
                         </div>
                         {pinnedSessions.map(renderSessionCard)}
@@ -2794,7 +3461,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   setIsFolderModalOpen(true);
                                 }}
                                 className="w-5 h-5 rounded hover:bg-black/10 dark:hover:bg-white/10 inline-flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Sửa thư mục"
+                                title="Edit folder"
                               >
                                 <Edit3 size={10} />
                               </button>
@@ -2806,7 +3473,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             <div className="p-1.5 space-y-1 border-t border-current/5">
                               {folderSessions.length === 0 ? (
                                 <div className="py-3 text-center text-[11px] opacity-50 italic">
-                                  Kéo thả hội thoại vào thư mục này
+                                  Drag and drop conversations into this folder
                                 </div>
                               ) : (
                                 folderSessions.map(renderSessionCard)
@@ -2844,7 +3511,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             {expandedFolderIds.includes('uncategorized') ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                           </span>
                           <span className="text-base shrink-0">📁</span>
-                          <span className="text-xs font-semibold truncate tracking-tight">Chưa phân loại</span>
+                          <span className="text-xs font-semibold truncate tracking-tight">Uncategorized</span>
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
@@ -2861,7 +3528,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         <div className="p-1.5 space-y-1 border-t border-current/5">
                           {uncategorizedSessions.length === 0 ? (
                             <div className="py-3 text-center text-[11px] opacity-50 italic">
-                              Tất cả hội thoại đều đã được phân loại vào thư mục!
+                              All conversations are organized into folders!
                             </div>
                           ) : (
                             uncategorizedSessions.map(renderSessionCard)
@@ -2876,6 +3543,194 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
           </div>
         )}
 
+        {/* 2. Studios Directory Mode */}
+        {sidebarNavMode === 'studios' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className={cn(
+              "px-3 py-2.5 border-b shrink-0 flex items-center justify-between",
+              isEditorial ? "bg-[#f4f4f5] border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
+            )}>
+              <div className="text-[11px] font-mono uppercase tracking-wider font-semibold opacity-70 flex items-center gap-1.5">
+                <Layers size={12} className={isEditorial ? "text-indigo-600" : "text-indigo-400"} />
+                <span>Studios Directory</span>
+              </div>
+              <span className="text-[10px] font-mono opacity-50">6 Studios</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+              {[
+                {
+                  id: 'bioscience',
+                  icon: Dna,
+                  name: '3D Bioscience & PDB',
+                  desc: 'Protein 3D molecular structures, DNA & FASTA decoding',
+                  accent: isEditorial ? 'text-emerald-600' : 'text-emerald-400',
+                  badge: null
+                },
+                {
+                  id: 'evolution',
+                  icon: Brain,
+                  name: 'Self-Evolving Cognitive Hub',
+                  desc: 'Reflexion, self-evaluation & Layer 6 rule distillation',
+                  accent: isEditorial ? 'text-violet-600' : 'text-violet-400',
+                  badge: (settings.evolvedRules || []).filter((r) => r.active).length > 0 
+                    ? `${(settings.evolvedRules || []).filter((r) => r.active).length} rules` 
+                    : null
+                },
+                {
+                  id: 'tasks',
+                  icon: Layers,
+                  name: 'Batch Task Queue',
+                  desc: 'Parallel background AI jobs with automated retries',
+                  accent: isEditorial ? 'text-cyan-600' : 'text-cyan-400',
+                  badge: batchQueue.runningCount > 0 
+                    ? `${batchQueue.runningCount} running` 
+                    : batchQueue.queuedCount > 0 
+                    ? `${batchQueue.queuedCount} queued` 
+                    : null,
+                  badgePulse: batchQueue.runningCount > 0
+                },
+                {
+                  id: 'data',
+                  icon: FileSpreadsheet,
+                  name: 'Data Analyst Studio',
+                  desc: 'CSV/JSON datasets, interactive visualization and statistical insights',
+                  accent: isEditorial ? 'text-teal-600' : 'text-teal-400',
+                  badge: null
+                },
+                {
+                  id: 'graph',
+                  icon: Network,
+                  name: 'D3 Knowledge Graph',
+                  desc: 'Interactive 2D/3D concept and entity network',
+                  accent: isEditorial ? 'text-amber-600' : 'text-amber-400',
+                  badge: null
+                },
+                {
+                  id: 'analytics',
+                  icon: BarChart3,
+                  name: 'Analytics Dashboard',
+                  desc: 'Token consumption, latency distributions, and usage metrics',
+                  accent: isEditorial ? 'text-blue-600' : 'text-blue-400',
+                  badge: null
+                }
+              ].map((studio) => {
+                const Icon = studio.icon;
+                const isActive = currentView === studio.id;
+                return (
+                  <button
+                    key={studio.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentView(studio.id as any);
+                      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                        setIsSidebarOpen(false);
+                      }
+                    }}
+                    className={cn(
+                      "w-full p-2.5 rounded-xl border text-left transition-all group flex items-start gap-2.5",
+                      isActive
+                        ? isEditorial
+                          ? "bg-white border-indigo-300 text-[#18181b] shadow-2xs"
+                          : "bg-[#18181b] border-indigo-500/50 text-[#f4f4f5] shadow-2xs"
+                        : isEditorial
+                        ? "bg-white/60 hover:bg-white border-[#e4e4e7] text-[#52525b] hover:text-[#18181b]"
+                        : "bg-[#121215] hover:bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5]"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border transition-colors mt-0.5",
+                      isActive
+                        ? isEditorial
+                          ? "bg-indigo-50 border-indigo-200"
+                          : "bg-indigo-500/20 border-indigo-500/30"
+                        : isEditorial
+                        ? "bg-[#f4f4f5] border-[#e4e4e7] group-hover:border-[#d4d4d8]"
+                        : "bg-[#18181b] border-[#27272a] group-hover:border-[#3f3f46]"
+                    )}>
+                      <Icon size={14} className={cn("shrink-0", isActive ? studio.accent : "opacity-75")} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className={cn(
+                          "text-xs font-semibold truncate",
+                          isActive ? (isEditorial ? "text-[#18181b]" : "text-white") : ""
+                        )}>
+                          {studio.name}
+                        </span>
+                        {studio.badge && (
+                          <span className={cn(
+                            "text-[9px] font-mono px-1.5 py-0.5 rounded-md font-semibold shrink-0 border",
+                            studio.badgePulse
+                              ? "bg-sky-500/15 border-sky-500/30 text-sky-400 animate-pulse"
+                              : isEditorial
+                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                              : "bg-indigo-500/10 border-indigo-500/25 text-indigo-300"
+                          )}>
+                            {studio.badge}
+                          </span>
+                        )}
+                      </div>
+                      <p className={cn(
+                        "text-[10px] mt-0.5 line-clamp-1 leading-snug",
+                        isEditorial ? "text-[#71717a]" : "text-[#71717a]"
+                      )}>
+                        {studio.desc}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 3. Knowledge Section (Memory, Documents, Notebook) */}
+        {sidebarNavMode === 'knowledge' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Knowledge Sub-tabs */}
+            <div className={cn(
+              "px-3 py-2 border-b shrink-0",
+              isEditorial ? "bg-[#f4f4f5] border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
+            )}>
+              <div className={cn(
+                "grid grid-cols-3 gap-1 p-0.5 rounded-lg border text-[11px] items-center",
+                isEditorial ? "bg-[#e4e4e7]/60 border-[#e4e4e7]" : "bg-[#09090b] border-[#27272a]"
+              )}>
+                {[
+                  { id: 'memory' as const, label: 'AI Memory', count: memory.length, icon: Brain },
+                  { id: 'documents' as const, label: 'Documents', count: documents.length, icon: FileText },
+                  { id: 'notebook' as const, label: 'Notebook', count: notes.length, icon: NotebookIcon },
+                ].map((sub) => {
+                  const isSubActive = sidebarSection === sub.id;
+                  const SubIcon = sub.icon;
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setSidebarSection(sub.id)}
+                      className={cn(
+                        "w-full min-w-0 h-6.5 rounded-md flex items-center justify-center gap-1 font-medium transition-colors truncate px-1",
+                        isSubActive
+                          ? isEditorial
+                            ? "bg-white text-[#18181b] font-semibold shadow-2xs"
+                            : "bg-[#27272a] text-[#f4f4f5] font-semibold"
+                          : isEditorial
+                          ? "text-[#52525b] hover:text-[#18181b]"
+                          : "text-[#a1a1aa] hover:text-[#f4f4f5]"
+                      )}
+                    >
+                      <SubIcon size={11} className="shrink-0 opacity-75" />
+                      <span className="truncate">{sub.label}</span>
+                      <span className="text-[9px] font-mono opacity-60">({sub.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sub-section views */}
+            <div className="flex-1 flex flex-col overflow-hidden">
         {/* Memory Section */}
         {sidebarSection === 'memory' && (
           <div className="flex-1 flex flex-col overflow-hidden">
@@ -2888,10 +3743,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold flex items-center gap-1.5">
                     <Sparkles size={11} className={autoMemoryEnabled ? "text-emerald-500" : "opacity-40"} />
-                    <span>Tự động ghi nhớ khi chat</span>
+                    <span>Auto-Learn during Chat</span>
                   </div>
                   <div className="text-[10px] opacity-65 truncate">
-                    {autoMemoryEnabled ? 'Đang BẬT (Tự bắt sở thích, đề tài, quy tắc)' : 'Đang TẮT (Chỉ nhập thủ công)'}
+                    {autoMemoryEnabled ? 'ON (Auto-extracts preferences, topics, rules)' : 'OFF (Manual entry only)'}
                   </div>
                 </div>
                 <button
@@ -2926,12 +3781,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 )}
               >
                 {isAutoExtractingAI ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                <span>{isAutoExtractingAI ? 'AI đang phân tích phiên chat...' : 'AI Trích xuất Nhớ & Sổ tay từ Chat'}</span>
+                <span>{isAutoExtractingAI ? 'Analyzing chat...' : 'Distill Memories & Notes from Chat'}</span>
               </button>
 
               <div className="pt-1 space-y-1.5">
                 <input 
-                  placeholder="Hoặc thêm thủ công: Khóa (VD: Sở thích, Đề tài)..." 
+                  placeholder="Or add manually: Key (e.g., Research Focus, Tech Stack)..." 
                   value={newMemoryKey}
                   onChange={(e) => setNewMemoryKey(e.target.value)}
                   className={cn(
@@ -2940,7 +3795,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   )}
                 />
                 <input 
-                  placeholder="Giá trị (VD: Thích văn phong học thuật Q1)..." 
+                  placeholder="Value (e.g., Prefers Q1 academic tone, TypeScript)..." 
                   value={newMemoryValue}
                   onChange={(e) => setNewMemoryValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -2959,7 +3814,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   )}
                 >
                   <Save size={11} />
-                  <span>Lưu vào Bộ nhớ AI</span>
+                  <span>Save to AI Memory</span>
                 </button>
               </div>
             </div>
@@ -2967,9 +3822,9 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               {memory.length === 0 ? (
                 <div className="text-center py-8 px-3 text-xs opacity-60 space-y-1.5">
                   <Brain size={20} className="mx-auto opacity-40 mb-1" />
-                  <div>Chưa có dữ liệu bộ nhớ dài hạn.</div>
+                  <div>No long-term memories yet.</div>
                   <div className="text-[11px] opacity-80">
-                    Khi bạn giới thiệu bản thân, đề tài hoặc quy tắc trong lúc chat, AI sẽ tự động lưu vào đây!
+                    When you mention your profile, research, or directives, AI remembers them here!
                   </div>
                 </div>
               ) : (
@@ -2987,7 +3842,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                       type="button"
                       onClick={() => deleteMemory(m.id, m.key)}
                       className="absolute right-2 top-2.5 opacity-0 group-hover:opacity-100 text-[#878278] hover:text-red-500 p-1 rounded transition-opacity"
-                      title="Xóa mục nhớ này"
+                      title="Delete memory item"
                     >
                       <Trash2 size={11} />
                     </button>
@@ -3004,9 +3859,9 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             {documents.length === 0 ? (
               <div className="text-center py-8 px-3 text-xs opacity-60 space-y-1.5">
                 <FileText size={20} className="mx-auto opacity-40 mb-1" />
-                <div>Chưa có tài liệu đã lưu.</div>
+                <div>No saved documents yet.</div>
                 <div className="text-[11px] opacity-75">
-                  Tài liệu đính kèm hoặc văn bản quan trọng sẽ xuất hiện ở đây!
+                  Attached documents or generated papers will appear here!
                 </div>
               </div>
             ) : (
@@ -3051,10 +3906,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold flex items-center gap-1.5">
                     <Sparkles size={11} className={autoNotesEnabled ? "text-amber-500" : "opacity-40"} />
-                    <span>Tự động tóm tắt vào Sổ tay</span>
+                    <span>Auto-Summarize to Notebook</span>
                   </div>
                   <div className="text-[10px] opacity-65 truncate">
-                    {autoNotesEnabled ? 'Đang BẬT (Tự lưu câu trả lời chuyên sâu)' : 'Đang TẮT (Chỉ lưu thủ công)'}
+                    {autoNotesEnabled ? 'ON (Auto-saves in-depth responses)' : 'OFF (Manual only)'}
                   </div>
                 </div>
                 <button
@@ -3089,12 +3944,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 )}
               >
                 {isAutoExtractingAI ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                <span>{isAutoExtractingAI ? 'AI đang tóm tắt phiên chat...' : 'AI Tóm tắt Phiên chat vào Sổ tay'}</span>
+                <span>{isAutoExtractingAI ? 'Summarizing chat to notebook...' : 'AI Summarize Chat to Notebook'}</span>
               </button>
 
               <div className="pt-1 space-y-1.5">
                 <input 
-                  placeholder="Hoặc ghi chú nhanh: Tiêu đề..." 
+                  placeholder="Or quick note title..." 
                   value={newNoteTitle}
                   onChange={(e) => setNewNoteTitle(e.target.value)}
                   className={cn(
@@ -3103,7 +3958,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   )}
                 />
                 <textarea 
-                  placeholder="Nội dung ghi chú..." 
+                  placeholder="Note content..." 
                   value={newNoteContent}
                   onChange={(e) => setNewNoteContent(e.target.value)}
                   className={cn(
@@ -3119,7 +3974,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   )}
                 >
                   <Save size={11} />
-                  <span>Lưu ghi chú</span>
+                  <span>Save Note</span>
                 </button>
               </div>
             </div>
@@ -3127,9 +3982,9 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               {notes.length === 0 ? (
                 <div className="text-center py-8 px-3 text-xs opacity-60 space-y-1.5">
                   <NotebookIcon size={20} className="mx-auto opacity-40 mb-1" />
-                  <div>Chưa có ghi chú.</div>
+                  <div>No notes yet.</div>
                   <div className="text-[11px] opacity-80">
-                    Các câu trả lời phân tích chuyên sâu, công thức hoặc báo cáo sẽ tự động được tóm tắt vào Sổ tay!
+                    In-depth analyses, formulas, and reports are automatically summarized here!
                   </div>
                 </div>
               ) : (
@@ -3162,22 +4017,25 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             </div>
           </div>
         )}
+            </div>
+          </div>
+        )}
 
         {/* User Profile & Settings Trigger — Streamlined Single Row */}
         <div className={cn(
           "p-2.5 border-t transition-colors",
-          isEditorial ? "bg-[#edeae2] border-[#e6e2d8]" : isMidnight ? "bg-[#090d15] border-[#1c273e]" : "bg-[#0e0f12] border-[#24262c]"
+          isEditorial ? "bg-[#f4f4f5] border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]"
         )}>
           <button
             type="button"
             onClick={() => setIsSettingsOpen(true)}
             className={cn(
-              "w-full p-2 rounded-xl border flex items-center justify-between gap-2.5 transition-all text-left group",
+              "w-full p-2 rounded-xl border flex items-center justify-between gap-2.5 transition-colors text-left group",
               isEditorial
-                ? "bg-white/70 hover:bg-white border-[#ded7ca] text-[#1e1d1b] shadow-2xs"
-                : "bg-white/[0.03] hover:bg-white/[0.07] border-white/[0.08] text-white"
+                ? "bg-white hover:bg-[#fafafa] border-[#e4e4e7] text-[#18181b]"
+                : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
             )}
-            title="Mở Cài đặt tài khoản, Đồng bộ Cloud, Cá nhân hóa & Hệ thống"
+            title="Open Account, AI Identity & System Settings"
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="relative shrink-0">
@@ -3186,34 +4044,27 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     src={firebaseUser.photoURL}
                     alt={formatCompactUserName(userId, firebaseUser)}
                     referrerPolicy="no-referrer"
-                    className="w-8 h-8 rounded-full object-cover border border-emerald-500/40 shadow-2xs"
+                    className="w-8 h-8 rounded-full object-cover border border-current/15"
                   />
                 ) : (
                   <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border",
-                    isEditorial ? "bg-amber-50 text-amber-800 border-[#ded7ca]" : "bg-white/10 text-white border-white/10"
+                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border",
+                    isEditorial ? "bg-[#f4f4f5] text-[#18181b] border-[#e4e4e7]" : "bg-[#27272a] text-[#f4f4f5] border-[#3f3f46]"
                   )}>
                     {formatCompactUserName(userId, firebaseUser).slice(0, 1).toUpperCase()}
                   </div>
                 )}
-                <span
-                  className={cn(
-                    "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2",
-                    isEditorial ? "border-white" : "border-[#0e0f12]",
-                    firebaseUser ? "bg-emerald-500" : "bg-amber-500"
-                  )}
-                />
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-semibold truncate">
+                <div className="text-xs font-medium truncate">
                   {formatCompactUserName(userId, firebaseUser)}
                 </div>
                 <div className={cn(
-                  "text-[10px] flex items-center gap-1 truncate opacity-75",
-                  isEditorial ? "text-[#6b665d]" : "text-slate-400"
+                  "text-[10px] flex items-center gap-1 truncate",
+                  isEditorial ? "text-[#71717a]" : "text-[#a1a1aa]"
                 )}>
                   <span className="truncate">
-                    {firebaseUser ? 'Đã đồng bộ Cloud' : 'Lưu cục bộ'} • Cài đặt
+                    {firebaseUser ? 'Cloud Synced' : 'Local Storage'} · Settings
                   </span>
                 </div>
               </div>
@@ -3221,8 +4072,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             <div className={cn(
               "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
               isEditorial
-                ? "text-[#6b665d] group-hover:text-amber-900 group-hover:bg-amber-100/60"
-                : "text-slate-400 group-hover:text-white group-hover:bg-white/10"
+                ? "text-[#71717a] group-hover:text-[#18181b]"
+                : "text-[#a1a1aa] group-hover:text-[#f4f4f5]"
             )}>
               <SettingsIcon size={15} />
             </div>
@@ -3231,33 +4082,52 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         </div>
       </motion.aside>
 
+      {/* Offline Connectivity Banner */}
+      <OfflineIndicator />
+
       {/* Main Studio Workspace Container */}
       <div className="flex-1 flex min-w-0 overflow-hidden relative">
         <main className={cn(
           "flex-1 flex flex-col h-full min-h-0 min-w-0 relative overflow-hidden transition-colors duration-200",
-          isEditorial ? "bg-[#fbfaf8]" : isMidnight ? "bg-[#0a0e17]" : "bg-[#0f1012]"
+          isEditorial ? "bg-[#fafafa]" : "bg-[#09090b]"
         )}>
-          {/* Responsive Luminous Top Header — Adaptive Multi-Breakpoint Layout */}
+          {/* Minimalist Neutral Top Header */}
           <header className={cn(
-            "min-h-13 py-1.5 px-2.5 sm:px-4 border-b shrink-0 z-10 backdrop-blur-md transition-colors flex flex-wrap lg:flex-nowrap items-center justify-between gap-2",
+            "h-13 px-2.5 sm:px-4 border-b shrink-0 z-40 sticky top-0 backdrop-blur-md transition-colors flex items-center justify-between gap-1.5 sm:gap-2",
             isEditorial 
-              ? "bg-[#ffffff]/90 border-[#e6e2d8]" 
-              : isMidnight 
-              ? "bg-[#101624]/90 border-[#1c273e]" 
-              : "bg-[#151619]/90 border-[#24262c]"
+              ? "bg-white/95 border-[#e4e4e7]" 
+              : "bg-[#09090b]/95 border-[#27272a]"
           )}>
             {/* Left Zone: Sidebar Toggle + Persona Selector + Model Selector */}
-            <div className="flex items-center gap-1.5 min-w-0 flex-1 lg:flex-initial">
+            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 shrink">
               <button 
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                 className={cn(
                   "w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0",
-                  isEditorial ? "hover:bg-[#f0ebe1] text-[#6b665d]" : "hover:bg-white/10 text-slate-400 hover:text-white"
+                  isEditorial ? "hover:bg-[#f4f4f5] text-[#52525b]" : "hover:bg-[#27272a] text-[#a1a1aa] hover:text-white"
                 )}
-                title="Đóng/Mở thanh bên"
+                title="Toggle Sidebar"
               >
                 <Menu size={16} className="shrink-0" />
               </button>
+
+              {/* Quick Return to Chat button when in non-chat views */}
+              {currentView !== 'chat' && (
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('chat')}
+                  className={cn(
+                    "h-7 px-2 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors border shrink-0",
+                    isEditorial 
+                      ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]" 
+                      : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                  )}
+                  title="Return to Main Chat"
+                >
+                  <MessageSquare size={12} className="opacity-75 text-indigo-500" />
+                  <span className="hidden sm:inline">Chat</span>
+                </button>
+              )}
 
               <div className="relative flex items-center min-w-0 shrink">
                 <VectorIcon
@@ -3265,7 +4135,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   size={12}
                   className={cn(
                     "absolute left-2.5 pointer-events-none shrink-0",
-                    isEditorial ? "text-amber-700" : "text-sky-400"
+                    isEditorial ? "text-indigo-600" : "text-indigo-400"
                   )}
                 />
                 <select
@@ -3279,193 +4149,519 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     if (found) selectPersona(found);
                   }}
                   className={cn(
-                    "h-8 rounded-lg pl-7 pr-6 text-xs font-medium cursor-pointer transition-all border shadow-2xs focus:outline-none appearance-none leading-none w-full max-w-[125px] sm:max-w-[175px] xl:max-w-[205px] truncate",
+                    "h-8 rounded-lg pl-7 pr-6 text-xs font-medium cursor-pointer transition-colors border focus:outline-none appearance-none leading-none w-full max-w-[112px] sm:max-w-[175px] xl:max-w-[205px] truncate",
                     isEditorial 
-                      ? "bg-[#f7f5ef] border-[#e2ddd3] hover:border-amber-600/50 text-[#1e1d1b]" 
-                      : isMidnight
-                      ? "bg-[#141b2d] border-[#22304d] text-white"
-                      : "bg-[#1a1b20] border-[#2b2d35] text-white"
+                      ? "bg-white border-[#e4e4e7] hover:bg-[#f4f4f5] text-[#18181b]" 
+                      : "bg-[#18181b] border-[#27272a] hover:bg-[#27272a] text-[#f4f4f5]"
                   )}
-                  title="Chuyển đổi Chuyên gia AI (Persona)"
+                  title="Switch AI Specialist Persona"
                 >
                   {personas.map(p => (
-                    <option key={p.id} value={p.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                      {p.name} {p.isCustom ? "(Tùy biến)" : ""}
+                    <option key={p.id} value={p.id} className={isEditorial ? "bg-white text-black" : "bg-[#18181b] text-white"}>
+                      {p.name} {p.isCustom ? "(Custom)" : ""}
                     </option>
                   ))}
-                  <option value="__manage__" className={isEditorial ? "bg-amber-100 text-amber-900 font-semibold" : "bg-sky-950 text-sky-300 font-semibold"}>
-                    Tùy biến Persona...
+                  <option value="__manage__" className={isEditorial ? "bg-[#f4f4f5] text-[#18181b] font-semibold" : "bg-[#27272a] text-white font-semibold"}>
+                    Manage Personas...
                   </option>
                 </select>
                 <ChevronDown size={12} className="absolute right-1.5 pointer-events-none opacity-50 shrink-0" />
               </div>
 
-              {/* Model Selector Pill */}
-              <div className="flex items-center gap-1 min-w-0 shrink">
-                <div className="relative flex items-center min-w-0 shrink">
-                  <Cpu
-                    size={12}
-                    className={cn(
-                      "absolute left-2.5 pointer-events-none shrink-0",
-                      (settings.model || '').includes('pro') || settings.model === 'gemini-4-argon'
-                        ? isEditorial ? "text-purple-700" : "text-purple-400"
-                        : isEditorial ? "text-amber-700" : "text-sky-400"
-                    )}
-                  />
-                  <select
-                    value={settings.model || 'auto-hybrid'}
-                    onChange={(e) => setSettings(prev => ({ ...prev, model: e.target.value }))}
-                    className={cn(
-                      "h-8 rounded-lg pl-7 pr-6 text-xs font-semibold cursor-pointer transition-all border shadow-2xs focus:outline-none appearance-none leading-none w-full max-w-[125px] sm:max-w-[175px] xl:max-w-[205px] truncate",
-                      (settings.model || '').includes('pro') || settings.model === 'gemini-4-argon'
-                        ? isEditorial
-                          ? "bg-purple-50 border-purple-300 text-purple-950 hover:border-purple-500"
-                          : "bg-purple-500/15 border-purple-500/40 text-purple-200 hover:border-purple-400"
-                        : settings.model === 'auto-hybrid'
-                        ? isEditorial
-                          ? "bg-emerald-50 border-emerald-300 text-emerald-950 hover:border-emerald-500"
-                          : "bg-emerald-500/15 border-emerald-500/35 text-emerald-200 hover:border-emerald-400"
-                        : isEditorial 
-                        ? "bg-[#f7f5ef] border-[#e2ddd3] hover:border-amber-600/50 text-[#1e1d1b]" 
-                        : isMidnight
-                        ? "bg-[#141b2d] border-[#22304d] text-sky-100"
-                        : "bg-[#1a1b20] border-[#2b2d35] text-slate-100"
-                    )}
-                    title="Chọn mô hình Gemini (Auto Hybrid / Pro / Flash)"
-                  >
-                    <optgroup label="TIẾT KIỆM QUOTA THÔNG MINH (Khuyên dùng)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                      {AVAILABLE_MODELS.filter(m => m.tier === 'hybrid').map(m => (
-                        <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                          {m.shortLabel} — {m.badge}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Dòng PRO (Suy luận sâu & Học thuật Q1)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                      {AVAILABLE_MODELS.filter(m => m.tier === 'pro').map(m => (
-                        <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                          {m.shortLabel} — {m.badge}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Dòng FLASH (Tốc độ cao & Đa năng)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                      {AVAILABLE_MODELS.filter(m => m.tier === 'flash').map(m => (
-                        <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                          {m.shortLabel} — {m.badge}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                  <ChevronDown size={12} className="absolute right-1.5 pointer-events-none opacity-50 shrink-0" />
-                </div>
+              {/* Model & Reasoning Selector Popover */}
+              <div className="relative shrink-0" ref={modelMenuRef}>
+                {(() => {
+                  const currentModelInfo =
+                    AVAILABLE_MODELS.find((m) => m.id === (settings.model || 'auto-hybrid')) ||
+                    AVAILABLE_MODELS[0];
+                  const currentEffortInfo =
+                    REASONING_EFFORT_OPTIONS.find((r) => r.id === (settings.reasoningEffort || 'auto')) ||
+                    REASONING_EFFORT_OPTIONS[0];
+                  const cpuIconColor =
+                    currentModelInfo.tier === 'pro'
+                      ? isEditorial ? 'text-violet-600' : 'text-violet-400'
+                      : currentModelInfo.tier === 'flash'
+                      ? isEditorial ? 'text-sky-600' : 'text-sky-400'
+                      : isEditorial ? 'text-emerald-600' : 'text-emerald-400';
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setIsModelMenuOpen((prev) => !prev)}
+                      className={cn(
+                        "h-8 rounded-lg px-2.5 text-xs font-medium inline-flex items-center gap-1.5 transition-colors border leading-none shrink-0",
+                        isEditorial
+                          ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                          : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                      )}
+                      title="Select Gemini Model & Reasoning Effort"
+                    >
+                      <Cpu size={12} className={cn("shrink-0", cpuIconColor)} />
+                      <span className="truncate max-w-[96px] sm:max-w-[135px] font-medium">
+                        {currentModelInfo.shortLabel}
+                      </span>
+                      {settings.reasoningEffort && settings.reasoningEffort !== 'auto' && (
+                        <span
+                          className={cn(
+                            "text-[9px] font-mono px-1.5 py-0.5 rounded font-medium uppercase shrink-0 leading-none border inline-flex items-center gap-1",
+                            isEditorial
+                              ? "bg-[#f4f4f5] text-[#18181b] border-[#e4e4e7]"
+                              : "bg-[#27272a] text-[#f4f4f5] border-[#3f3f46]"
+                          )}
+                          title={`Reasoning: ${settings.reasoningEffort.toUpperCase()}`}
+                        >
+                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", currentEffortInfo.dotColor)} />
+                          <span>{currentEffortInfo.code}</span>
+                        </span>
+                      )}
+                      <ChevronDown
+                        size={11}
+                        className={cn(
+                          "opacity-60 transition-transform duration-200 shrink-0",
+                          isModelMenuOpen ? "rotate-180" : ""
+                        )}
+                      />
+                    </button>
+                  );
+                })()}
+
+                <AnimatePresence>
+                  {isModelMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "fixed sm:absolute left-3 right-3 sm:left-0 sm:right-auto top-13 sm:top-10 sm:w-92 rounded-2xl border shadow-xl p-2.5 z-50 space-y-2.5",
+                        isEditorial
+                          ? "bg-white border-[#e4e4e7] text-[#18181b]"
+                          : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
+                      )}
+                    >
+                      {/* 1. Primary Section: Model Selection List */}
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[11px] font-mono uppercase tracking-wider font-semibold opacity-75 flex items-center gap-1.5">
+                          <Cpu size={12} className={isEditorial ? "text-indigo-600" : "text-indigo-400"} />
+                          <span>Select Gemini Model</span>
+                        </span>
+                        <span className="text-[10px] opacity-50 font-mono">6 versions</span>
+                      </div>
+
+                      <div className="space-y-2 max-h-[260px] overflow-y-auto pr-0.5">
+                        {[
+                          {
+                            key: 'hybrid',
+                            label: 'Smart Hybrid Routing',
+                            items: AVAILABLE_MODELS.filter((m) => m.tier === 'hybrid')
+                          },
+                          {
+                            key: 'pro',
+                            label: 'Pro Series — Deep Reasoning & STEM',
+                            items: AVAILABLE_MODELS.filter((m) => m.tier === 'pro')
+                          },
+                          {
+                            key: 'flash',
+                            label: 'Flash Series — High Speed & Efficiency',
+                            items: AVAILABLE_MODELS.filter((m) => m.tier === 'flash')
+                          }
+                        ].map((group) => (
+                          <div key={group.key} className="space-y-1">
+                            <div className="px-2 text-[10px] font-mono uppercase tracking-wider font-medium opacity-50">
+                              {group.label}
+                            </div>
+                            {group.items.map((model) => {
+                              const isSelected = (settings.model || 'auto-hybrid') === model.id;
+                              const badgeColorClass =
+                                model.tier === 'hybrid'
+                                  ? isEditorial
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                    : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                                  : model.tier === 'pro'
+                                  ? isEditorial
+                                    ? 'bg-violet-50 border-violet-200 text-violet-700'
+                                    : 'bg-violet-500/10 border-violet-500/25 text-violet-300'
+                                  : isEditorial
+                                  ? 'bg-sky-50 border-sky-200 text-sky-700'
+                                  : 'bg-sky-500/10 border-sky-500/25 text-sky-300';
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  onClick={() => {
+                                    const nextIsPro = model.id === 'gemini-4-argon' || model.id.includes('pro');
+                                    setSettings((prev) => ({
+                                      ...prev,
+                                      model: model.id,
+                                      reasoningEffort:
+                                        nextIsPro && prev.reasoningEffort === 'minimal'
+                                          ? 'low'
+                                          : prev.reasoningEffort,
+                                    }));
+                                    setIsModelMenuOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full text-left p-2 rounded-xl transition-colors flex items-start justify-between gap-2 border",
+                                    isSelected
+                                      ? isEditorial
+                                        ? "bg-indigo-50/60 border-indigo-200 text-[#18181b]"
+                                        : "bg-indigo-500/10 border-indigo-500/30 text-[#f4f4f5]"
+                                      : isEditorial
+                                      ? "border-transparent hover:bg-[#f4f4f5]/60"
+                                      : "border-transparent hover:bg-[#18181b]"
+                                  )}
+                                >
+                                  <div className="space-y-0.5 min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span
+                                        className={cn(
+                                          "text-xs font-medium truncate",
+                                          isSelected ? "font-semibold" : ""
+                                        )}
+                                      >
+                                        {model.shortLabel}
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 border leading-none",
+                                          badgeColorClass
+                                        )}
+                                      >
+                                        {model.badge}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] opacity-65 leading-snug line-clamp-2">
+                                      {model.desc}
+                                    </p>
+                                  </div>
+                                  {isSelected && (
+                                    <Check
+                                      size={14}
+                                      className={cn("shrink-0 mt-0.5", isEditorial ? "text-indigo-600" : "text-indigo-400")}
+                                    />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 2. Docked Footer Section: Reasoning Effort (Single Canonical Control) */}
+                      <div className={cn(
+                        "p-2.5 rounded-xl border space-y-2",
+                        isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
+                      )}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 opacity-80">
+                            <Brain size={12} className={isEditorial ? "text-violet-600" : "text-violet-400"} />
+                            <span>Reasoning Effort</span>
+                          </span>
+                          <span className={cn(
+                            "text-[9px] font-mono font-medium px-1.5 py-0.5 rounded border leading-none inline-flex items-center gap-1",
+                            isEditorial
+                              ? "bg-white border-[#e4e4e7] text-[#18181b]"
+                              : "bg-[#27272a] border-[#3f3f46] text-[#f4f4f5]"
+                          )}>
+                            <span
+                              className={cn(
+                                "w-1.5 h-1.5 rounded-full shrink-0",
+                                REASONING_EFFORT_OPTIONS.find((r) => r.id === (settings.reasoningEffort || 'auto'))?.dotColor
+                              )}
+                            />
+                            <span>{REASONING_EFFORT_OPTIONS.find((r) => r.id === (settings.reasoningEffort || 'auto'))?.name}</span>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-1">
+                          {REASONING_EFFORT_OPTIONS.map((effort) => {
+                            const isActive = (settings.reasoningEffort || 'auto') === effort.id;
+                            const isDisabledOnPro = effort.id === 'minimal' && isProModelSelected;
+                            return (
+                              <button
+                                key={effort.id}
+                                type="button"
+                                disabled={isDisabledOnPro}
+                                onClick={() => selectReasoningEffort(effort.id)}
+                                className={cn(
+                                  "py-1.5 px-1 rounded-lg transition-colors text-center flex flex-col items-center justify-center gap-0.5 border leading-none",
+                                  isDisabledOnPro
+                                    ? "opacity-35 cursor-not-allowed border-transparent"
+                                    : isActive
+                                    ? isEditorial
+                                      ? "bg-indigo-600 border-indigo-600 text-white font-semibold shadow-2xs"
+                                      : "bg-indigo-500 border-indigo-500 text-white font-semibold shadow-2xs"
+                                    : isEditorial
+                                    ? "bg-white border-[#e4e4e7] text-[#52525b] hover:bg-[#f4f4f5]"
+                                    : "bg-[#121215] border-[#27272a] text-[#a1a1aa] hover:bg-[#27272a] hover:text-white"
+                                )}
+                                title={
+                                  isDisabledOnPro
+                                    ? "Minimal effort is only supported on Flash series (Pro requires Low minimum)"
+                                    : `${effort.name} — ${effort.desc}`
+                                }
+                              >
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold">
+                                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", isActive ? "bg-white" : effort.dotColor)} />
+                                  <span>{effort.code}</span>
+                                </span>
+                                <span className="text-[9px] opacity-80 font-medium">{effort.shortLabel}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <p className="text-[10px] opacity-65 leading-snug">
+                          {REASONING_EFFORT_OPTIONS.find((r) => r.id === (settings.reasoningEffort || 'auto'))?.desc}
+                        </p>
+                      </div>
+
+                      {/* 3. Quick FinOps & API Tier Control Bar */}
+                      <div className={cn(
+                        "p-2.5 rounded-xl border space-y-2",
+                        isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
+                      )}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 opacity-85">
+                            <Zap size={12} className="text-emerald-500" />
+                            <span>API Tier & FinOps</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsModelMenuOpen(false);
+                              setIsSettingsOpen(true);
+                            }}
+                            className={cn(
+                              "text-[10px] font-medium px-2 py-0.5 rounded border transition-colors",
+                              isEditorial
+                                ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-indigo-600"
+                                : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-indigo-400"
+                            )}
+                          >
+                            FinOps & Budget →
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { id: 'free_tier_lock', label: 'Free Lock ($0)', desc: 'Flash/Lite only + 1 call/turn' },
+                            { id: 'smart_hybrid', label: 'Smart Hybrid', desc: '80% Flash + Auto Pro' },
+                            { id: 'paid_pro', label: 'Paid Pro', desc: 'Full Pro + Aux telemetry' },
+                          ].map((tier) => {
+                            const active = (settings.billingTierMode || 'smart_hybrid') === tier.id;
+                            return (
+                              <button
+                                key={tier.id}
+                                type="button"
+                                onClick={() => {
+                                  setSettings((prev) => ({
+                                    ...prev,
+                                    billingTierMode: tier.id as any,
+                                    model: tier.id === 'free_tier_lock' && prev.model === 'gemini-4-argon' ? 'gemini-3.8-flash' : prev.model,
+                                    skipBackgroundCalls: tier.id === 'free_tier_lock' ? true : prev.skipBackgroundCalls,
+                                  }));
+                                }}
+                                className={cn(
+                                  "py-1.5 px-1.5 rounded-lg text-[10px] font-medium border text-center transition-colors leading-tight",
+                                  active
+                                    ? "bg-emerald-600 border-emerald-600 text-white font-semibold"
+                                    : isEditorial
+                                    ? "bg-white border-[#e4e4e7] text-[#52525b] hover:bg-[#f4f4f5]"
+                                    : "bg-[#121215] border-[#27272a] text-[#a1a1aa] hover:bg-[#27272a]"
+                                )}
+                                title={tier.desc}
+                              >
+                                {tier.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
-            
-            {/* Center Zone: Segmented Workspace Switcher — Horizontally Scrollable on Mobile/Tablet */}
-            <div className={cn(
-              "order-3 lg:order-2 w-full lg:w-auto flex items-center p-0.5 rounded-xl border shadow-inner overflow-x-auto no-scrollbar shrink-0",
-              isEditorial ? "bg-[#f3efe6] border-[#e4dfd4]" : isMidnight ? "bg-[#090d16] border-[#182337]" : "bg-[#0d0e11] border-[#1f2025]"
-            )}>
-              {[
-                { id: 'chat', icon: MessageSquare, label: 'Hội thoại' },
-                { id: 'evolution', icon: Brain, label: 'Tự Tiến Hóa', badge: (settings.evolvedRules || []).filter(r => r.active).length },
-                { id: 'bioscience', icon: Dna, label: 'Sinh học 3D' },
-                { id: 'graph', icon: Network, label: 'Đồ thị Tri thức' },
-                { id: 'data', icon: FileSpreadsheet, label: 'Data Studio' },
-                { id: 'analytics', icon: BarChart3, label: 'Phân tích' }
-              ].map((view) => {
-                const Icon = view.icon;
-                const active = currentView === view.id;
-                return (
-                  <button
-                    key={view.id}
-                    onClick={() => setCurrentView(view.id as any)}
-                    className={cn(
-                      "h-7 px-2.5 text-xs font-medium rounded-lg transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none flex-1 lg:flex-initial",
-                      active
-                        ? isEditorial
-                          ? "bg-white text-[#1e1d1b] shadow-2xs font-semibold"
-                          : "bg-[#252832] text-white shadow-2xs font-semibold"
-                        : isEditorial
-                          ? "text-[#736e65] hover:text-[#1e1d1b]"
-                          : "text-[#878c99] hover:text-white"
-                    )}
-                    title={view.label}
-                  >
-                    <Icon size={13} className={cn("shrink-0", active ? (isEditorial ? "text-amber-700" : "text-blue-400") : "opacity-70")} />
-                    <span className="inline sm:inline lg:hidden xl:inline whitespace-nowrap">{view.label}</span>
-                    {typeof view.badge === 'number' && view.badge > 0 && (
-                      <span className={cn(
-                        "px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold",
-                        active
-                          ? isEditorial ? "bg-amber-100 text-amber-800" : "bg-sky-500/25 text-sky-300"
-                          : isEditorial ? "bg-black/5 text-[#6b665d]" : "bg-white/10 text-slate-300"
-                      )}>
-                        {view.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
 
-            {/* Right Zone: Clean Studio Controls */}
-            <div className="order-2 lg:order-3 flex items-center gap-1 sm:gap-1.5 shrink-0">
-              {/* Theme Gallery Trigger */}
-              <button
-                onClick={() => setIsThemeGalleryOpen(true)}
-                className={cn(
-                  "h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-all shadow-2xs shrink-0 leading-none",
-                  isEditorial 
-                    ? "bg-[#faf6ee] hover:bg-[#f3ede0] border-[#ded7ca] text-[#2c2824]" 
-                    : isMidnight
-                    ? "bg-[#141e30] hover:bg-[#1c2a44] border-[#223558] text-sky-200"
-                    : "bg-[#181a24] hover:bg-[#222533] border-white/10 text-slate-200"
-                )}
-                title="Chọn giao diện Studio (6 chủ đề)"
-              >
-                <Palette size={13} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-sky-400")} />
-                <span className="hidden xl:inline font-medium truncate max-w-[90px]">
-                  {activeThemeInfo.name.split('(')[0].trim()}
-                </span>
-              </button>
+            {/* Right Zone: Minimalist Neutral Controls */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              {/* Batch Queue Active Running / Error Indicator */}
+              {batchQueue.runningCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('tasks')}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors shrink-0",
+                    isEditorial
+                      ? "bg-sky-50 border-sky-200 text-sky-900"
+                      : "bg-sky-500/15 border-sky-500/30 text-sky-300"
+                  )}
+                  title="View active background tasks"
+                >
+                  <Loader2 size={12} className="animate-spin text-sky-500 shrink-0" />
+                  <span className="hidden sm:inline font-mono">{batchQueue.runningCount} active</span>
+                </button>
+              ) : batchQueue.failedCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('tasks')}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors shrink-0",
+                    isEditorial
+                      ? "bg-red-50 border-red-200 text-red-900"
+                      : "bg-red-500/15 border-red-500/30 text-red-300"
+                  )}
+                  title="View failed tasks"
+                >
+                  <AlertCircle size={12} className="text-red-500 shrink-0" />
+                  <span className="hidden sm:inline font-mono">{batchQueue.failedCount} failed</span>
+                </button>
+              ) : null}
 
-              {/* 1-Click Quick Light/Dark Toggle */}
+              {/* Dedicated 1-Click Light / Dark Toggle */}
               <button
+                type="button"
                 onClick={() => setTheme(isEditorial ? 'dark' : 'editorial')}
                 className={cn(
-                  "w-8 h-8 rounded-lg border text-xs inline-flex items-center justify-center transition-all shadow-2xs shrink-0",
+                  "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors shrink-0 leading-none",
                   isEditorial
-                    ? "bg-white border-[#ded7ca] text-[#706a61] hover:text-[#1e1d1b] hover:bg-[#f7f5ef]"
-                    : "bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10"
+                    ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                    : "bg-[#18181b] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
                 )}
-                title={isEditorial ? "Chuyển sang chế độ Tối (Dark)" : "Chuyển sang chế độ Sáng (Editorial)"}
+                title={isEditorial ? "Switch to Dark Mode" : "Switch to Light Mode"}
               >
-                {isEditorial ? <Moon size={14} className="shrink-0 text-amber-900/80" /> : <Sun size={14} className="shrink-0 text-amber-400" />}
+                {isEditorial ? (
+                  <>
+                    <Moon size={13} className="shrink-0 text-indigo-600" />
+                    <span className="hidden sm:inline font-medium">Dark</span>
+                  </>
+                ) : (
+                  <>
+                    <Sun size={13} className="shrink-0 text-amber-400" />
+                    <span className="hidden sm:inline font-medium">Light</span>
+                  </>
+                )}
               </button>
 
-              {/* Chat Width Mode Toggle */}
+              {/* PWA Mobile Install Trigger on Top Bar */}
+              <PWAInstallButton isEditorial={isEditorial} isMidnight={isMidnight} variant="header" />
+
+              {activeArtifact && (
+                <button
+                  onClick={() => setIsWorkspaceOpen(!isWorkspaceOpen)}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors shrink-0 leading-none",
+                    isWorkspaceOpen
+                      ? isEditorial 
+                        ? "bg-indigo-600 border-indigo-600 text-white" 
+                        : "bg-indigo-500 border-indigo-500 text-white"
+                      : isEditorial 
+                        ? "bg-white border-[#e4e4e7] text-[#52525b] hover:text-[#18181b]" 
+                        : "bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-white"
+                  )}
+                  title="Toggle Interactive Canvas"
+                >
+                  <Edit3 size={12} className="shrink-0" />
+                  <span className="hidden md:inline">Canvas</span>
+                </button>
+              )}
+
+              {messages.length > 0 && (
+                <div className="relative">
+                  <button 
+                    type="button"
+                    onClick={() => setIsChatExportOpen(prev => !prev)}
+                    className={cn(
+                      "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 transition-colors shrink-0",
+                      isEditorial 
+                        ? "bg-white border-[#e4e4e7] text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
+                        : "bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
+                    )}
+                    title="Export chat to PDF, Word (.doc) or Markdown"
+                  >
+                    <Download size={13} className="shrink-0" />
+                    <span className="hidden xl:inline">Export</span>
+                    <ChevronDown size={11} className="opacity-60" />
+                  </button>
+
+                  <AnimatePresence>
+                    {isChatExportOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                        className={cn(
+                          "absolute right-0 top-10 w-52 rounded-xl border shadow-xl p-1.5 z-50 space-y-0.5 text-xs",
+                          isEditorial
+                            ? "bg-white border-[#e4e4e7] text-[#18181b]"
+                            : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => exportChat('pdf')}
+                          className={cn(
+                            "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
+                            isEditorial ? "hover:bg-[#f4f4f5]" : "hover:bg-[#27272a]"
+                          )}
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            <Printer size={13} className="opacity-70 shrink-0" />
+                            <span>Export PDF (A4)</span>
+                          </span>
+                          <span className="text-[10px] font-mono opacity-50">.pdf</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => exportChat('word')}
+                          className={cn(
+                            "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
+                            isEditorial ? "hover:bg-[#f4f4f5]" : "hover:bg-[#27272a]"
+                          )}
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            <FileText size={13} className="opacity-70 shrink-0" />
+                            <span>Export Word (.doc)</span>
+                          </span>
+                          <span className="text-[10px] font-mono opacity-50">.doc</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => exportChat('md')}
+                          className={cn(
+                            "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
+                            isEditorial ? "hover:bg-[#f4f4f5]" : "hover:bg-[#27272a]"
+                          )}
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            <Download size={13} className="opacity-70 shrink-0" />
+                            <span>Download Markdown</span>
+                          </span>
+                          <span className="text-[10px] font-mono opacity-50">.md</span>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {/* Chat Width Mode Toggle - Positioned at outermost right edge */}
               <button
                 type="button"
                 onClick={() => {
                   setChatWidthMode(prev => prev === 'wide' ? 'full' : prev === 'full' ? 'normal' : 'wide');
                 }}
                 className={cn(
-                  "hidden sm:inline-flex w-8 h-8 rounded-lg border text-xs items-center justify-center transition-all shadow-2xs shrink-0",
+                  "w-8 h-8 rounded-lg border text-xs inline-flex items-center justify-center transition-colors shrink-0",
                   chatWidthMode !== 'normal'
                     ? isEditorial 
-                      ? "bg-amber-100/70 border-amber-300 text-amber-900" 
-                      : "bg-sky-500/15 border-sky-400/30 text-sky-200"
+                      ? "bg-[#f4f4f5] border-[#d4d4d8] text-[#18181b]" 
+                      : "bg-[#27272a] border-[#3f3f46] text-[#f4f4f5]"
                     : isEditorial
-                    ? "bg-white border-[#ded7ca] text-[#706a61] hover:text-[#1e1d1b] hover:bg-[#f7f5ef]"
-                    : "bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10"
+                    ? "bg-white border-[#e4e4e7] text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
+                    : "bg-[#18181b] border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
                 )}
-                title={
-                  chatWidthMode === 'wide' 
-                    ? "Độ rộng khung chat: Mở rộng (Click để chuyển sang Toàn màn hình)" 
-                    : chatWidthMode === 'full' 
-                    ? "Độ rộng khung chat: Toàn màn hình (Click để chuyển sang Tiêu chuẩn)" 
-                    : "Độ rộng khung chat: Tiêu chuẩn (Click để chuyển sang Mở rộng)"
-                }
+                title="Change conversation width"
+                aria-label="Change conversation width"
               >
                 {chatWidthMode === 'full' ? (
                   <Maximize2 size={13} className="shrink-0" />
@@ -3473,213 +4669,154 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   <Minimize2 size={13} className="shrink-0" />
                 )}
               </button>
-
-              {activeArtifact && (
-                <button
-                  onClick={() => setIsWorkspaceOpen(!isWorkspaceOpen)}
-                  className={cn(
-                    "h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-all shadow-2xs shrink-0 leading-none",
-                    isWorkspaceOpen
-                      ? isEditorial 
-                        ? "bg-amber-600/15 border-amber-500/40 text-amber-900 font-semibold" 
-                        : "bg-sky-500/15 border-sky-500/35 text-sky-300 font-semibold"
-                      : isEditorial 
-                        ? "bg-white border-[#e6e2d8] text-[#524d45] hover:text-[#1e1d1b]" 
-                        : "bg-white/5 border-white/10 text-slate-300 hover:text-white"
-                  )}
-                  title="Đóng/Mở bảng Interactive Canvas"
-                >
-                  <Edit3 size={12} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-sky-400")} />
-                  <span className="hidden md:inline">Canvas</span>
-                </button>
-              )}
-
-              {messages.length > 0 && (
-                <>
-                  <button 
-                    onClick={async () => {
-                      if (!currentSessionId || messages.length === 0) return;
-                      const session = sessions.find(s => s.id === currentSessionId);
-                      const content = messages.map(m => `**${m.role === 'user' ? 'User' : 'AI'}**: ${m.content}`).join('\n\n---\n\n');
-                      await fetch('/api/documents', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                          userId, 
-                          title: `Doc: ${session?.name || 'Chat'}`, 
-                          content 
-                        })
-                      });
-                      fetchDocuments();
-                      setSidebarSection('documents');
-                    }}
-                    className={cn(
-                      "w-8 h-8 rounded-lg border inline-flex items-center justify-center transition-all shadow-2xs shrink-0",
-                      isEditorial 
-                        ? "bg-white border-[#e6e2d8] text-[#6b665d] hover:text-[#1e1d1b] hover:bg-[#f7f5ef]" 
-                        : "bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10"
-                    )}
-                    title="Lưu cuộc trò chuyện vào Tài liệu (Docs)"
-                  >
-                    <Save size={13} className="shrink-0" />
-                  </button>
-                  <div className="relative">
-                    <button 
-                      type="button"
-                      onClick={() => setIsChatExportOpen(prev => !prev)}
-                      className={cn(
-                        "h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 transition-all shadow-2xs shrink-0",
-                        isEditorial 
-                          ? "bg-white border-[#e6e2d8] text-[#4d483f] hover:text-[#1e1d1b] hover:bg-[#f7f5ef]" 
-                          : "bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10"
-                      )}
-                      title="Xuất hội thoại / báo cáo ra PDF, Word (.doc) hoặc Markdown"
-                    >
-                      <Download size={13} className="shrink-0" />
-                      <span className="hidden xl:inline">Xuất file</span>
-                      <ChevronDown size={11} className="opacity-60" />
-                    </button>
-
-                    <AnimatePresence>
-                      {isChatExportOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 6, scale: 0.96 }}
-                          className={cn(
-                            "absolute right-0 top-10 w-56 rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 text-xs backdrop-blur-xl",
-                            isEditorial
-                              ? "bg-white/98 border-[#ded7ca] text-[#1e1d1b]"
-                              : "bg-[#101522]/98 border-white/15 text-white"
-                          )}
-                        >
-                          <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider opacity-60 border-b border-current/10">
-                            Xuất toàn bộ hội thoại
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => exportChat('pdf')}
-                            className={cn(
-                              "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
-                              isEditorial ? "hover:bg-amber-50" : "hover:bg-white/10"
-                            )}
-                          >
-                            <span className="flex items-center gap-2 font-medium">
-                              <Printer size={13} className="text-rose-500 shrink-0" />
-                              <span>Xuất PDF (Chuẩn A4)</span>
-                            </span>
-                            <span className="text-[10px] font-mono opacity-60">.pdf</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => exportChat('word')}
-                            className={cn(
-                              "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
-                              isEditorial ? "hover:bg-amber-50" : "hover:bg-white/10"
-                            )}
-                          >
-                            <span className="flex items-center gap-2 font-medium">
-                              <FileText size={13} className="text-blue-500 shrink-0" />
-                              <span>Xuất Microsoft Word</span>
-                            </span>
-                            <span className="text-[10px] font-mono opacity-60">.doc</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => exportChat('md')}
-                            className={cn(
-                              "w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-colors",
-                              isEditorial ? "hover:bg-amber-50" : "hover:bg-white/10"
-                            )}
-                          >
-                            <span className="flex items-center gap-2 font-medium">
-                              <Download size={13} className="text-emerald-500 shrink-0" />
-                              <span>Tải Markdown gốc</span>
-                            </span>
-                            <span className="text-[10px] font-mono opacity-60">.md</span>
-                          </button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </>
-              )}
             </div>
           </header>
 
-        {currentView === 'evolution' ? (
-          <SelfEvolvingStudio
-            isEditorial={isEditorial}
-            isMidnight={isMidnight}
-            messages={messages}
-            settings={settings}
-            personas={personas}
-            activePersonaId={activePersonaId}
-            onUpdateSettings={(partial) => setSettings((prev) => ({ ...prev, ...partial }))}
-            onUpdateMessage={(msgIdx, updatedMsg) => {
-              setMessages((prev) => {
-                const next = [...prev];
-                if (next[msgIdx]) next[msgIdx] = updatedMsg;
-                return next;
-              });
-            }}
-            onEvolvePersonaInstruction={(personaId, appendedRule) => {
-              setPersonas((prev) =>
-                prev.map((p) => {
-                  if (p.id !== personaId) return p;
-                  const updatedChecklist = [
-                    ...(p.verificationChecklist || []),
-                    appendedRule
-                  ];
-                  return {
-                    ...p,
-                    instruction: `${p.instruction}\n\n[QUY TẮC TỰ TIẾN HÓA]: ${appendedRule}`,
-                    verificationChecklist: updatedChecklist
-                  };
-                })
-              );
-              showFolderToast('Đã nâng cấp bộ chỉ thị gốc của Chuyên gia (Persona)!');
-            }}
-            onClose={() => setCurrentView('chat')}
-          />
-        ) : currentView === 'analytics' ? (
-          <AnalyticsDashboard
-            userId={userId!}
-            currentSessionId={currentSessionId}
-            sessions={sessions}
-            onClose={() => setCurrentView('chat')}
-          />
-        ) : currentView === 'graph' ? (
-          <KnowledgeGraph
-            userId={userId!}
-            currentSessionId={currentSessionId}
-            sessions={sessions}
-            messages={messages}
-            onSelectSession={(sid) => {
-              setCurrentSessionId(sid);
-              setCurrentView('chat');
-            }}
-            onClose={() => setCurrentView('chat')}
-          />
-        ) : currentView === 'data' ? (
-          <DataAnalystStudio
-            onSendToChat={(promptText) => {
-              setCurrentView('chat');
-              handleSend(promptText);
-            }}
-            onClose={() => setCurrentView('chat')}
-          />
-        ) : currentView === 'bioscience' ? (
-          <BioscienceStudio
-            isDark={!isEditorial}
-            firebaseUser={firebaseUser}
-            savedRecords={savedBioscienceRecords}
-            onTriggerGoogleLogin={handleGoogleSignIn}
-            onSendToChat={(promptText) => {
-              setCurrentView('chat');
-              handleSend(promptText);
-            }}
-          />
+        {currentView !== 'chat' ? (
+          <Suspense
+            fallback={
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-xs opacity-75">
+                <Loader2 size={24} className="animate-spin text-amber-600 dark:text-sky-400" />
+                <span className="font-mono">Initializing Specialized Studio workspace...</span>
+              </div>
+            }
+          >
+            {currentView === 'evolution' ? (
+              <SelfEvolvingStudio
+                isEditorial={isEditorial}
+                isMidnight={isMidnight}
+                messages={messages}
+                settings={settings}
+                personas={personas}
+                activePersonaId={activePersonaId}
+                activePersona={personas.find((p) => p.id === activePersonaId) || personas[0] || DEFAULT_PERSONAS[0]}
+                onUpdateSettings={(updaterOrPartial) =>
+                  setSettings((prev) =>
+                    typeof updaterOrPartial === 'function' ? updaterOrPartial(prev) : { ...prev, ...updaterOrPartial }
+                  )
+                }
+                onUpdateMessage={(msgIdx, updatedMsg) => {
+                  setMessages((prev) => {
+                    const next = [...prev];
+                    if (next[msgIdx]) next[msgIdx] = updatedMsg;
+                    return next;
+                  });
+                }}
+                onUpdateMessageContent={(msgIdx, newContent, evaluation) => {
+                  setMessages((prev) => {
+                    const next = [...prev];
+                    if (next[msgIdx]) {
+                      next[msgIdx] = {
+                        ...next[msgIdx],
+                        content: newContent,
+                        ...(evaluation ? { selfEvaluation: evaluation } : {})
+                      };
+                    }
+                    return next;
+                  });
+                }}
+                onSavePersona={(updatedPersona) => {
+                  setPersonas((prev) =>
+                    prev.map((p) => (p.id === updatedPersona.id ? updatedPersona : p))
+                  );
+                  showFolderToast(`Upgraded Persona "${updatedPersona.name}"!`, 'success');
+                }}
+                onEvolvePersonaInstruction={(personaId, appendedRule) => {
+                  setPersonas((prev) =>
+                    prev.map((p) => {
+                      if (p.id !== personaId) return p;
+                      const updatedChecklist = [
+                        ...(p.verificationChecklist || []),
+                        appendedRule
+                      ];
+                      return {
+                        ...p,
+                        instruction: `${p.instruction}\n\n[SELF-EVOLVED RULE]: ${appendedRule}`,
+                        verificationChecklist: updatedChecklist
+                      };
+                    })
+                  );
+                  showFolderToast('Upgraded specialist persona system prompt!');
+                }}
+                onClose={() => setCurrentView('chat')}
+              />
+            ) : currentView === 'analytics' ? (
+              <AnalyticsDashboard
+                userId={userId!}
+                currentSessionId={currentSessionId}
+                sessions={sessions}
+                onClose={() => setCurrentView('chat')}
+              />
+            ) : currentView === 'graph' ? (
+              <KnowledgeGraph
+                userId={userId!}
+                currentSessionId={currentSessionId}
+                sessions={sessions}
+                messages={messages}
+                onSelectSession={(sid) => {
+                  setCurrentSessionId(sid);
+                  setCurrentView('chat');
+                }}
+                onClose={() => setCurrentView('chat')}
+              />
+            ) : currentView === 'data' ? (
+              <DataAnalystStudio
+                onSendToChat={(promptText) => {
+                  setCurrentView('chat');
+                  handleSend(promptText);
+                }}
+                onClose={() => setCurrentView('chat')}
+              />
+            ) : currentView === 'bioscience' ? (
+              <BioscienceStudio
+                isDark={!isEditorial}
+                firebaseUser={firebaseUser}
+                savedRecords={savedBioscienceRecords}
+                onTriggerGoogleLogin={handleGoogleSignIn}
+                onSendToChat={(promptText) => {
+                  setCurrentView('chat');
+                  handleSend(promptText);
+                }}
+              />
+            ) : (
+              <BatchTaskDashboard
+                isEditorial={isEditorial}
+                isMidnight={isMidnight}
+                tasks={batchQueue.tasks}
+                priorityConfig={batchQueue.priorityConfig}
+                tokenTelemetry={batchQueue.tokenTelemetry}
+                onUpdatePriorityConfig={batchQueue.updatePriorityConfig}
+                onUpdateTaskPriority={batchQueue.updateTaskPriority}
+                availableFolders={folders}
+                sessionsCount={sessions.length}
+                onEnqueueTask={batchQueue.enqueueTask}
+                onCancelTask={batchQueue.cancelTask}
+                onPauseTask={batchQueue.pauseTask}
+                onResumeTask={batchQueue.resumeTask}
+                onRetryTask={batchQueue.retryTask}
+                onDeleteTask={batchQueue.deleteTask}
+                onClearCompleted={batchQueue.clearCompleted}
+                onInjectToChat={(title, report) => {
+                  setCurrentView('chat');
+                  handleSend(`[Background Task Report "${title}"]:\n\n${report}`);
+                }}
+                onSaveAsNote={(title, content) => {
+                  quickSaveNoteFromMessage(content, title);
+                }}
+                onSaveAsDoc={async (title, content) => {
+                  if (!userId) return;
+                  await fetch('/api/documents', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, title, content })
+                  });
+                  fetchDocuments();
+                  showFolderToast(`Saved report as Document: "${title.slice(0, 40)}"`, 'success');
+                }}
+                onClose={() => setCurrentView('chat')}
+              />
+            )}
+          </Suspense>
         ) : (
           <>
             {/* Main Chat Stream */}
@@ -3712,8 +4849,271 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 />
               ) : (
                 <div className={cn("space-y-8 pb-14", getChatContainerClass())}>
+                  {/* Automated 'Key Insights' Summary Panel Pinned to the Top of the Chat Thread */}
+                  {(() => {
+                    const pinnedResearchMessages = messages
+                      .map((msg, idx) => ({ msg, idx }))
+                      .filter(
+                        (item) =>
+                          Boolean(item.msg.deepResearch) &&
+                          item.msg.deepResearch?.isPinnedToThreadTop !== false
+                      );
+                    if (pinnedResearchMessages.length === 0) return null;
+
+                    const activePinned =
+                      pinnedResearchMessages[pinnedResearchMessages.length - 1];
+                    const dr = activePinned.msg.deepResearch!;
+                    const top5: KeyInsightConclusion[] =
+                      dr.strategicConclusions && dr.strategicConclusions.length >= 5
+                        ? dr.strategicConclusions.slice(0, 5)
+                        : extractStrategicConclusionsLocally(
+                            activePinned.msg.content || '',
+                            dr
+                          );
+
+                    const getCatStyle = (cat: KeyInsightConclusion['category']) => {
+                      switch (cat) {
+                        case 'mechanism':
+                          return isEditorial
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+                        case 'empirical':
+                          return isEditorial
+                            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                        case 'architecture':
+                          return isEditorial
+                            ? 'bg-sky-100 text-sky-900 border-sky-300'
+                            : 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+                        case 'risk':
+                          return isEditorial
+                            ? 'bg-rose-100 text-rose-900 border-rose-300'
+                            : 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+                        default:
+                          return isEditorial
+                            ? 'bg-purple-100 text-purple-900 border-purple-300'
+                            : 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+                      }
+                    };
+
+                    return (
+                      <div
+                        id="pinned-key-insights-banner"
+                        className={cn(
+                          'rounded-2xl border overflow-hidden shadow-md transition-all',
+                          isEditorial
+                            ? 'bg-[#faf7f0] border-amber-300/80 text-[#1e1d1b]'
+                            : isMidnight
+                            ? 'bg-[#0d1525]/95 border-emerald-500/35 text-slate-100'
+                            : 'bg-[#101520]/95 border-emerald-500/35 text-slate-100'
+                        )}
+                      >
+                        {/* Pinned Header Bar */}
+                        <div
+                          className={cn(
+                            'px-4 py-3 border-b flex items-center justify-between gap-3 flex-wrap',
+                            isEditorial
+                              ? 'bg-[#f3ede0] border-[#e2dacb]'
+                              : 'bg-emerald-500/[0.08] border-white/10'
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={cn(
+                                'w-7 h-7 rounded-lg border flex items-center justify-center shrink-0',
+                                isEditorial
+                                  ? 'bg-amber-100 border-amber-300 text-amber-900'
+                                  : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              )}
+                            >
+                              <Pin size={13} className="fill-current" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-400">
+                                  Pinned Key Insights · Top 5 Strategic Conclusions
+                                </span>
+                                <span className="text-[10px] font-mono opacity-50">
+                                  · Deep Research Synthesis
+                                </span>
+                              </div>
+                              <h3 className="text-xs sm:text-sm font-bold truncate">
+                                {dr.topic}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const el = document.getElementById(
+                                  `msg-item-${activePinned.idx}`
+                                );
+                                el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }}
+                              className={cn(
+                                'h-7 px-2.5 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1 transition-all',
+                                isEditorial
+                                  ? 'bg-white hover:bg-amber-50 border-[#ded7ca] text-[#2c2824]'
+                                  : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-200'
+                              )}
+                              title="Scroll to full Deep Research report in chat thread"
+                            >
+                              <Compass size={11} />
+                              <span>Jump to Report</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const text = top5
+                                  .map(
+                                    (c, idx) =>
+                                      `${idx + 1}. [${c.category.toUpperCase()} · ${c.impactScore}%] ${c.title}: ${c.conclusion}`
+                                  )
+                                  .join('\n');
+                                navigator.clipboard.writeText(
+                                  `Top 5 Strategic Conclusions — ${dr.topic}\n\n${text}`
+                                );
+                                setCopiedPinnedInsights(true);
+                                setTimeout(() => setCopiedPinnedInsights(false), 2000);
+                              }}
+                              className={cn(
+                                'h-7 px-2 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1 transition-all',
+                                isEditorial
+                                  ? 'bg-white hover:bg-neutral-100 border-[#ded7ca] text-[#2c2824]'
+                                  : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-200'
+                              )}
+                              title="Copy Top 5 Strategic Conclusions"
+                            >
+                              {copiedPinnedInsights ? (
+                                <Check size={11} className="text-emerald-500" />
+                              ) : (
+                                <Copy size={11} />
+                              )}
+                              <span>{copiedPinnedInsights ? 'Copied' : 'Copy'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => saveStrategicConclusionsToNote(dr.topic, top5)}
+                              className={cn(
+                                'h-7 px-2.5 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 transition-all',
+                                isEditorial
+                                  ? 'bg-amber-700 hover:bg-amber-800 text-white'
+                                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                              )}
+                              title="Save Top 5 Strategic Conclusions to Notebook"
+                            >
+                              <NotebookIcon size={11} />
+                              <span className="hidden sm:inline">Save Note</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setIsPinnedInsightsCollapsed(!isPinnedInsightsCollapsed)
+                              }
+                              className={cn(
+                                'h-7 px-2 rounded-lg border text-[11px] font-medium inline-flex items-center gap-1 transition-all',
+                                isEditorial
+                                  ? 'bg-white border-[#ded7ca] text-[#5c5549]'
+                                  : 'bg-white/5 border-white/10 text-slate-300'
+                              )}
+                              title={
+                                isPinnedInsightsCollapsed
+                                  ? 'Expand Key Insights panel'
+                                  : 'Collapse Key Insights panel'
+                              }
+                            >
+                              <ChevronDown
+                                size={12}
+                                className={cn(
+                                  'transition-transform',
+                                  !isPinnedInsightsCollapsed && 'rotate-180'
+                                )}
+                              />
+                              <span>{isPinnedInsightsCollapsed ? 'Expand (5)' : 'Collapse'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                togglePinDeepResearchInsights(activePinned.idx)
+                              }
+                              className="h-7 w-7 rounded-lg opacity-60 hover:opacity-100 hover:text-rose-500 inline-flex items-center justify-center transition-all"
+                              title="Unpin Key Insights from thread top"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Top 5 Strategic Conclusions Cards */}
+                        {!isPinnedInsightsCollapsed && (
+                          <div className="p-3.5 grid grid-cols-1 md:grid-cols-5 gap-2.5">
+                            {top5.map((item, idx) => (
+                              <div
+                                key={item.id || idx}
+                                className={cn(
+                                  'p-3 rounded-xl border flex flex-col justify-between gap-2 transition-all',
+                                  isEditorial
+                                    ? 'bg-white border-[#e2dcd0] hover:border-amber-400'
+                                    : 'bg-[#0b0f18] border-white/10 hover:border-emerald-500/40'
+                                )}
+                              >
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span
+                                      className={cn(
+                                        'px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border',
+                                        getCatStyle(item.category)
+                                      )}
+                                    >
+                                      #{idx + 1} · {item.category.toUpperCase()}
+                                    </span>
+                                    <span className="text-[10px] font-mono font-bold text-emerald-500">
+                                      {item.impactScore}%
+                                    </span>
+                                  </div>
+                                  <div className="text-xs font-bold leading-snug line-clamp-2">
+                                    {item.title}
+                                  </div>
+                                  <p
+                                    className={cn(
+                                      'text-[11px] leading-relaxed line-clamp-4',
+                                      isEditorial ? 'text-[#3d3830]' : 'text-slate-300'
+                                    )}
+                                  >
+                                    {item.conclusion}
+                                  </p>
+                                </div>
+
+                                {item.actionableTakeaway && (
+                                  <div
+                                    className={cn(
+                                      'pt-1.5 border-t text-[10px] font-medium line-clamp-2',
+                                      isEditorial
+                                        ? 'border-[#eee8dc] text-amber-900'
+                                        : 'border-white/10 text-sky-300/90'
+                                    )}
+                                    title={item.actionableTakeaway}
+                                  >
+                                    → {item.actionableTakeaway}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {messages.map((m, i) => (
                     <motion.div 
+                      id={`msg-item-${i}`}
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.22 }}
@@ -3741,48 +5141,49 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             <div className="whitespace-pre-wrap">{m.content}</div>
                           </div>
 
-                          {/* Subtle User Metadata & Actions */}
-                          <div className="flex items-center gap-3 px-1">
-                            {m.userAnalysis && m.userAnalysis.intent !== 'Analyzing' && (
-                              <div className={cn(
-                                "inline-flex items-center gap-1.5 text-[10px] font-mono leading-none",
-                                isEditorial ? "text-[#7a7368]" : "text-[#7c808c]"
-                              )}>
-                                <span className={isEditorial ? "text-emerald-700 font-semibold" : "text-emerald-400"}>{m.userAnalysis.intent}</span>
-                                <span className="opacity-40">·</span>
-                                <span>{m.userAnalysis.emotion}</span>
-                                <span className="opacity-40">·</span>
-                                <span>{m.userAnalysis.complexity}</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                              <button 
-                                onClick={() => handleAnalyzeUser(i, m.content)}
-                                className={cn(
-                                  "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-medium leading-none transition-colors",
-                                  isEditorial ? "text-[#8a8376] hover:text-[#1e1d1b] hover:bg-black/5" : "text-[#687082] hover:text-slate-200 hover:bg-white/5"
-                                )}
-                                disabled={m.userAnalysis?.intent === 'Analyzing'}
-                              >
-                                {m.userAnalysis?.intent === 'Analyzing' ? (
-                                  <Loader2 size={11} className="animate-spin text-emerald-500 shrink-0" />
-                                ) : (
-                                  <User size={11} className="shrink-0" />
-                                )}
-                                <span>Phân tích</span>
-                              </button>
-                              <button
-                                onClick={() => handleForkSession(i)}
-                                className={cn(
-                                  "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-medium leading-none transition-colors",
-                                  isEditorial ? "text-[#8a8376] hover:text-amber-800 hover:bg-amber-50" : "text-[#687082] hover:text-sky-400 hover:bg-white/5"
-                                )}
-                                title="Tạo nhánh hội thoại mới từ tin nhắn này"
-                              >
-                                <GitBranch size={11} className="shrink-0" />
-                                <span>Rẽ nhánh</span>
-                              </button>
-                            </div>
+                          {/* Subtle User Actions */}
+                          <div className="flex items-center gap-1.5 px-1 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMessage(`user-${i}`, m.content)}
+                              className={cn(
+                                "inline-flex items-center gap-1 h-5 px-1.5 rounded text-[11px] font-medium leading-none transition-colors",
+                                copiedMessageId === `user-${i}`
+                                  ? isEditorial
+                                    ? "text-emerald-700"
+                                    : "text-emerald-400"
+                                  : isEditorial
+                                  ? "text-[#8a8376] hover:text-[#1e1d1b]"
+                                  : "text-[#687082] hover:text-slate-200"
+                              )}
+                              title="Copy message"
+                            >
+                              {copiedMessageId === `user-${i}` ? (
+                                <>
+                                  <Check size={11} className="shrink-0 text-emerald-500" />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={11} className="shrink-0" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleForkSession(i)}
+                              className={cn(
+                                "inline-flex items-center gap-1 h-5 px-1.5 rounded text-[11px] font-medium leading-none transition-colors",
+                                isEditorial
+                                  ? "text-[#8a8376] hover:text-amber-800"
+                                  : "text-[#687082] hover:text-sky-400"
+                              )}
+                              title="Fork conversation from this message"
+                            >
+                              <GitBranch size={11} className="shrink-0" />
+                              <span>Fork</span>
+                            </button>
                           </div>
                         </div>
                       ) : (
@@ -3799,8 +5200,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             <VectorIcon name={settings.aiIdentity?.avatar || 'sparkles'} size={15} />
                           </div>
 
-                          <div className="flex-1 min-w-0 space-y-3">
-                            {/* Specialist Role Header + Verified Status */}
+                          <div className="flex-1 min-w-0 space-y-2.5">
+                            {/* Compact Role Header */}
                             <div className="flex flex-wrap items-center gap-2 text-xs">
                               <span className={cn(
                                 "font-display font-semibold leading-none",
@@ -3808,22 +5209,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               )}>
                                 {settings.aiIdentity?.name || settings.aiRoleName || personas.find(p => p.id === activePersonaId)?.name || 'Gemini Atelier'}
                               </span>
-                              {settings.aiIdentity?.title && (
-                                <span className={cn(
-                                  "h-5 px-1.5 rounded-md border inline-flex items-center text-[10px] font-mono leading-none shrink-0 opacity-80",
-                                  isEditorial ? "bg-[#f5efe4] border-[#ded7ca] text-amber-900" : "bg-white/5 border-white/10 text-slate-300"
-                                )}>
-                                  {settings.aiIdentity.title}
-                                </span>
-                              )}
                               {settings.steadfastMode && (
                                 <span className={cn(
-                                  "h-5 px-2 rounded-md border inline-flex items-center gap-1 text-[10px] font-mono font-medium leading-none shrink-0",
+                                  "h-4 px-1.5 rounded border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0",
                                   isEditorial 
                                     ? "bg-amber-50 border-amber-300/60 text-amber-800"
                                     : "bg-amber-500/10 border-amber-500/25 text-amber-300"
                                 )}>
-                                  <Shield size={10} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-amber-400")} />
+                                  <Shield size={9} className="shrink-0" />
                                   <span>Steadfast</span>
                                 </span>
                               )}
@@ -3832,7 +5225,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   type="button"
                                   onClick={() => setCurrentView('evolution')}
                                   className={cn(
-                                    "h-5 px-2 rounded-md border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0 transition-all",
+                                    "h-4 px-1.5 rounded border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0 transition-all",
                                     m.selfEvaluation.wasRefined
                                       ? isEditorial
                                         ? "bg-purple-50 border-purple-300 text-purple-900 font-semibold"
@@ -3843,33 +5236,9 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   )}
                                   title={m.selfEvaluation.critique}
                                 >
-                                  <Activity size={10} className="shrink-0" />
-                                  <span>
-                                    {m.selfEvaluation.wasRefined ? 'Reflexion V2' : 'Tự đánh giá'}: {m.selfEvaluation.overallScore}%
-                                  </span>
+                                  <Activity size={9} className="shrink-0" />
+                                  <span>{m.selfEvaluation.wasRefined ? `V2 · ${m.selfEvaluation.overallScore}%` : `${m.selfEvaluation.overallScore}%`}</span>
                                 </button>
-                              )}
-                              {m.emergenceAnalysis?.hasEmergence && (
-                                <span className={cn(
-                                  "h-5 px-2 rounded-md border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0",
-                                  isEditorial 
-                                    ? "bg-purple-50 border-purple-200 text-purple-800"
-                                    : "bg-purple-500/10 border-purple-500/25 text-purple-300"
-                                )}>
-                                  <Zap size={10} className="text-purple-500 shrink-0" />
-                                  <span>{m.emergenceAnalysis.category} ({m.emergenceAnalysis.confidenceScore}%)</span>
-                                </span>
-                              )}
-                              {m.intentAlignment && (
-                                <span className={cn(
-                                  "h-5 px-2 rounded-md border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0",
-                                  m.intentAlignment.isAligned 
-                                    ? isEditorial ? "bg-emerald-50 border-emerald-200 text-emerald-800 font-medium" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
-                                    : isEditorial ? "bg-amber-50 border-amber-200 text-amber-800 font-medium" : "bg-amber-500/10 border-amber-500/20 text-amber-300"
-                                )}>
-                                  <CheckCircle2 size={10} className="shrink-0" />
-                                  <span>{m.intentAlignment.note}</span>
-                                </span>
                               )}
                             </div>
 
@@ -3877,7 +5246,16 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             {m.deepResearch && (
                               <DeepResearchTracker
                                 research={m.deepResearch}
+                                reportText={m.content}
                                 theme={theme}
+                                isPinnedToTop={m.deepResearch.isPinnedToThreadTop !== false}
+                                onTogglePinToTop={() => togglePinDeepResearchInsights(i)}
+                                onSaveKeyInsightsToNote={(conclusions) =>
+                                  saveStrategicConclusionsToNote(
+                                    m.deepResearch?.topic || 'Deep Research',
+                                    conclusions
+                                  )
+                                }
                                 onRunFollowUpResearch={(followUpQuery) => {
                                   setSettings(prev => ({ ...prev, deepResearchMode: true }));
                                   handleSend(followUpQuery);
@@ -3886,7 +5264,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                   openInCanvas({
                                     type: 'markdown',
                                     code: m.content,
-                                    title: m.deepResearch?.topic || 'Bản thảo Nghiên cứu Đa Tác tử',
+                                    title: m.deepResearch?.topic || 'Multi-Agent Research Synthesis',
                                     messageIndex: i
                                   })
                                 }
@@ -3898,9 +5276,139 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               "max-w-none transition-colors",
                               isEditorial ? "prose prose-neutral text-[#252320]" : "prose prose-invert"
                             )}>
-                              <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {m.content}
-                              </Markdown>
+                              {m.content ? (
+                                <Markdown
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
+                                  components={{
+                                    table({ children, ...props }) {
+                                      return (
+                                        <div
+                                          className={cn(
+                                            "my-3.5 overflow-x-auto rounded-xl border",
+                                            isEditorial
+                                              ? "border-[#dcd5c7] bg-[#fdfbf7]"
+                                              : "border-white/10 bg-[#0d1018]/70"
+                                          )}
+                                        >
+                                          <table {...props} className="!my-0 w-full border-collapse">
+                                            {children}
+                                          </table>
+                                        </div>
+                                      );
+                                    },
+                                    pre({ children, ...props }) {
+                                      const childEl = Array.isArray(children) ? children[0] : children;
+                                      const codeProps = (childEl as any)?.props || {};
+                                      const className = String(codeProps.className || '');
+                                      const langMatch = className.match(/language-([\w-]+)/);
+                                      const lang = (langMatch ? langMatch[1] : 'code').toLowerCase();
+                                      const rawCode = String(codeProps.children || '').replace(/\n$/, '');
+                                      const codeKey = `code-${i}-${rawCode.slice(0, 24).replace(/\s+/g, '_')}`;
+
+                                      if (lang === 'mermaid') {
+                                        return (
+                                          <div className="my-3.5 w-full">
+                                            <Suspense
+                                              fallback={
+                                                <div
+                                                  className={cn(
+                                                    "h-[240px] rounded-xl border flex items-center justify-center text-xs font-mono",
+                                                    isEditorial
+                                                      ? "bg-[#fbfaf7] border-[#dcd5c7] text-[#5c5549]"
+                                                      : "bg-[#0b0e15] border-white/10 text-slate-400"
+                                                  )}
+                                                >
+                                                  Rendering diagram...
+                                                </div>
+                                              }
+                                            >
+                                              <LazyMermaidRenderer
+                                                code={rawCode}
+                                                isEditorial={isEditorial}
+                                                onOpenInCanvas={() => {
+                                                  setActiveArtifact({
+                                                    type: 'mermaid',
+                                                    code: rawCode,
+                                                    title: `Diagram #${i + 1}`,
+                                                    messageIndex: i
+                                                  });
+                                                  setCanvasHistory([rawCode]);
+                                                  setWorkspaceTab('preview');
+                                                  setIsWorkspaceOpen(true);
+                                                }}
+                                              />
+                                            </Suspense>
+                                          </div>
+                                        );
+                                      }
+
+                                      return (
+                                        <div className="relative group/code my-3 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
+                                          <div
+                                            className={cn(
+                                              "flex items-center justify-between px-3 py-1.5 text-[11px] font-mono border-b",
+                                              isEditorial
+                                                ? "bg-[#ebe5d9] border-[#dcd5c7] text-[#5c5549]"
+                                                : "bg-[#141824] border-white/10 text-slate-400"
+                                            )}
+                                          >
+                                            <span className="uppercase tracking-wider text-[10px] font-semibold opacity-80">
+                                              {lang}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyMessage(codeKey, rawCode, 'Copied code block')}
+                                              className={cn(
+                                                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium transition-colors",
+                                                copiedMessageId === codeKey
+                                                  ? "text-emerald-500"
+                                                  : isEditorial
+                                                  ? "text-[#5c5549] hover:text-[#1e1d1b] hover:bg-black/5"
+                                                  : "text-slate-300 hover:text-white hover:bg-white/10"
+                                              )}
+                                              title="Copy code block"
+                                            >
+                                              {copiedMessageId === codeKey ? (
+                                                <>
+                                                  <Check size={11} className="shrink-0 text-emerald-500" />
+                                                  <span>Copied</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Copy size={11} className="shrink-0" />
+                                                  <span>Copy</span>
+                                                </>
+                                              )}
+                                            </button>
+                                          </div>
+                                          <pre {...props} className="!my-0 !rounded-t-none">
+                                            {children}
+                                          </pre>
+                                        </div>
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {m.content}
+                                </Markdown>
+                              ) : (
+                                isLoading && i === messages.length - 1 && (
+                                  <div className="flex items-center gap-2 py-1.5 text-xs opacity-75">
+                                    <Loader2 size={13} className="animate-spin text-indigo-500 shrink-0" />
+                                    <span>Generating...</span>
+                                    <button
+                                      type="button"
+                                      onClick={handleStopExecution}
+                                      className="ml-2 px-2 py-0.5 rounded border text-[11px] font-medium text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors inline-flex items-center gap-1"
+                                      title="Stop generation"
+                                    >
+                                      <Square size={9} className="fill-current" />
+                                      <span>Stop</span>
+                                    </button>
+                                  </div>
+                                )
+                              )}
                             </div>
 
                             {/* AI Council Multi-Expert Debate View */}
@@ -3914,12 +5422,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
                             {/* Search Grounding Sources */}
                             {m.groundingMetadata?.groundingChunks && (
-                              <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                              <div className="pt-0.5 flex flex-wrap items-center gap-1.5">
                                 <span className={cn(
-                                  "text-[10px] font-mono inline-flex items-center gap-1 mr-1 leading-none shrink-0",
+                                  "text-[10px] font-mono inline-flex items-center gap-1 mr-0.5 leading-none shrink-0",
                                   isEditorial ? "text-emerald-800 font-semibold" : "text-emerald-400"
                                 )}>
-                                  <ExternalLink size={10} className="shrink-0" /> Nguồn xác thực:
+                                  <ExternalLink size={10} className="shrink-0" /> Sources:
                                 </span>
                                 {m.groundingMetadata.groundingChunks.map((chunk: any, idx: number) => (
                                   chunk.web && (
@@ -3929,102 +5437,68 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className={cn(
-                                        "h-6 px-2 rounded-md text-[11px] inline-flex items-center gap-1 transition-all border leading-none shrink-0",
+                                        "h-5 px-2 rounded text-[11px] inline-flex items-center gap-1 transition-all border leading-none shrink-0",
                                         isEditorial
-                                          ? "bg-white border-[#e6e2d8] text-[#554f46] hover:text-emerald-800 hover:border-emerald-500/50 shadow-xs"
+                                          ? "bg-white border-[#e6e2d8] text-[#554f46] hover:text-emerald-800 hover:border-emerald-500/50"
                                           : "bg-[#0e1118] border-white/[0.07] hover:border-emerald-500/35 text-[#9fa5b5] hover:text-emerald-300"
                                       )}
                                     >
-                                      <span className="truncate max-w-[180px]">{chunk.web.title}</span>
+                                      <span className="truncate max-w-[160px]">{chunk.web.title}</span>
                                     </a>
                                   )
                                 ))}
                               </div>
                             )}
 
-                            {/* Refined Action Toolbar Pill */}
-                            <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                            {/* Approved 5-Button Concise Action Bar: Copy · Canvas · Refine · Note · Fork */}
+                            {m.content && (
                               <div className={cn(
-                                "inline-flex flex-wrap items-center gap-1 p-1 rounded-xl border shadow-xs",
-                                isEditorial 
-                                  ? "bg-[#f4efe6] border-[#e2dcd0] text-[#6b6459]" 
-                                  : isMidnight
-                                  ? "bg-[#101726] border-[#1d2942] text-[#8d96a8]"
-                                  : "bg-[#0c0f17] border-white/[0.06] text-[#858c9c]"
+                                "pt-0.5 flex flex-wrap items-center gap-1 text-[11px]",
+                                isEditorial ? "text-[#7a7368]" : "text-[#7c808c]"
                               )}>
                                 <button
-                                  onClick={() =>
-                                    openInCanvas({
-                                      type: extractArtifacts(m.content)?.type || 'markdown',
-                                      code: extractArtifacts(m.content)?.code || m.content,
-                                      title: `Canvas #${i + 1}`,
-                                      messageIndex: i
-                                    })
-                                  }
+                                  type="button"
+                                  onClick={() => handleCopyMessage(`ai-${i}`, m.content)}
                                   className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1.5 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial 
-                                      ? "hover:bg-white hover:text-amber-900" 
-                                      : "hover:bg-white/[0.06] hover:text-sky-300"
+                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
+                                    copiedMessageId === `ai-${i}`
+                                      ? isEditorial
+                                        ? "bg-emerald-50 text-emerald-800"
+                                        : "bg-emerald-500/15 text-emerald-300"
+                                      : isEditorial
+                                      ? "hover:bg-black/5 hover:text-[#1e1d1b]"
+                                      : "hover:bg-white/[0.06] hover:text-white"
                                   )}
-                                  title="Mở trong Interactive Canvas để biên tập song song"
+                                  title="Copy response"
                                 >
-                                  <Edit3 size={11} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-sky-400")} />
-                                  <span>Canvas</span>
-                                </button>
-
-                                <button
-                                  onClick={() => handleReflexionUpgradeForMessage(i)}
-                                  disabled={reflexionLoadingIndex === i}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1.5 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial
-                                      ? "hover:bg-white hover:text-purple-900"
-                                      : "hover:bg-white/[0.06] hover:text-purple-300"
-                                  )}
-                                  title="Chạy vòng lặp Self-Improved AI (Reflexion): Tự phê bình, viết lại bản V2 sâu sắc hơn và trích xuất quy tắc Layer 6"
-                                >
-                                  {reflexionLoadingIndex === i ? (
-                                    <Loader2 size={11} className="animate-spin text-purple-500 shrink-0" />
+                                  {copiedMessageId === `ai-${i}` ? (
+                                    <>
+                                      <Check size={11} className="shrink-0 text-emerald-500" />
+                                      <span>Copied</span>
+                                    </>
                                   ) : (
-                                    <Sparkles size={11} className={cn("shrink-0", isEditorial ? "text-purple-700" : "text-purple-400")} />
+                                    <>
+                                      <Copy size={11} className="shrink-0" />
+                                      <span>Copy</span>
+                                    </>
                                   )}
-                                  <span>{m.selfEvaluation?.wasRefined ? 'Reflexion V2 (Chạy lại)' : 'Tự cải thiện (Reflexion)'}</span>
-                                </button>
-
-                                <button
-                                  onClick={() => handleRunCouncilForMessage(i)}
-                                  disabled={debatingMessageIndex === i}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1.5 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial 
-                                      ? "hover:bg-white hover:text-indigo-900" 
-                                      : "hover:bg-white/[0.06] hover:text-indigo-300"
-                                  )}
-                                  title="Triệu tập Hội đồng 3 chuyên gia phản biện cho câu trả lời này"
-                                >
-                                  {debatingMessageIndex === i ? (
-                                    <Loader2 size={11} className="animate-spin text-indigo-500 shrink-0" />
-                                  ) : (
-                                    <Users size={11} className={cn("shrink-0", isEditorial ? "text-indigo-700" : "text-indigo-400")} />
-                                  )}
-                                  <span>{m.councilDebate ? 'Hội đồng (Chạy lại)' : 'Hội đồng phản biện'}</span>
                                 </button>
 
                                 {extractArtifacts(m.content) && (
-                                  <button 
+                                  <button
+                                    type="button"
                                     onClick={() => {
                                       const art = extractArtifacts(m.content);
                                       if (art) {
-                                        setActiveArtifact({ 
-                                          ...art, 
+                                        setActiveArtifact({
+                                          ...art,
                                           title:
                                             art.type === 'mermaid'
-                                              ? `Sơ đồ #${i + 1}`
+                                              ? `Diagram #${i + 1}`
                                               : art.type === 'latex'
-                                              ? `LaTeX Paper #${i + 1}`
+                                              ? `LaTeX #${i + 1}`
                                               : `Preview #${i + 1}`,
-                                          messageIndex: i
+                                          messageIndex: i,
                                         });
                                         setCanvasHistory([art.code]);
                                         setWorkspaceTab('preview');
@@ -4032,114 +5506,54 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                       }
                                     }}
                                     className={cn(
-                                      "h-6 px-2 rounded-md inline-flex items-center gap-1.5 text-xs font-medium leading-none transition-colors shrink-0",
+                                      "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
                                       isEditorial
-                                        ? "bg-purple-100 text-purple-900 hover:bg-purple-200"
-                                        : "bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
+                                        ? "text-purple-800 hover:bg-purple-50"
+                                        : "text-purple-300 hover:bg-purple-500/15"
                                     )}
+                                    title="Open Canvas & Interactive Preview"
                                   >
-                                    <Eye size={11} className="text-purple-500 shrink-0" />
-                                    <span>
-                                      {extractArtifacts(m.content)?.type === 'mermaid'
-                                        ? 'Xem sơ đồ'
-                                        : extractArtifacts(m.content)?.type === 'latex'
-                                        ? 'Bản in LaTeX Paper'
-                                        : 'Chạy Preview'}
-                                    </span>
+                                    <Eye size={11} className="shrink-0" />
+                                    <span>Canvas</span>
                                   </button>
                                 )}
 
                                 <button
-                                  onClick={() => handleForkSession(i)}
+                                  type="button"
+                                  onClick={() => handleReflexionUpgradeForMessage(i)}
+                                  disabled={reflexionLoadingIndex === i}
                                   className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial ? "hover:bg-white hover:text-emerald-900" : "hover:bg-white/[0.06] hover:text-emerald-300"
+                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
+                                    isEditorial
+                                      ? "hover:bg-black/5 hover:text-purple-900"
+                                      : "hover:bg-white/[0.06] hover:text-purple-300"
                                   )}
-                                  title="Rẽ nhánh cuộc trò chuyện từ thời điểm này"
+                                  title="Self-Critique & Refine response (Reflexion V2)"
                                 >
-                                  <GitBranch size={11} className="shrink-0" />
-                                  <span>Rẽ nhánh</span>
-                                </button>
-
-                                <button 
-                                  onClick={() => quickSaveNoteFromMessage(m.content, messages[i - 1]?.content)}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial ? "hover:bg-white hover:text-amber-900" : "hover:bg-white/[0.06] hover:text-amber-300"
-                                  )}
-                                  title="Lưu thẳng câu trả lời này vào Sổ tay (Notes) chỉ với 1 chạm"
-                                >
-                                  <NotebookIcon size={11} className="shrink-0" />
-                                  <span>Lưu Note</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    const docTitle =
-                                      m.deepResearch?.topic ||
-                                      messages[i - 1]?.content?.slice(0, 60) ||
-                                      `Báo cáo Atelier AI #${i + 1}`;
-                                    const html = `
-                                      <div class="paper-header">
-                                        <h1>${docTitle}</h1>
-                                        <div class="paper-date">${new Date().toLocaleDateString('vi-VN')}</div>
-                                      </div>
-                                      <div>${convertMarkdownWithMathToHtml(m.content)}</div>
-                                    `;
-                                    downloadWordDoc(docTitle, docTitle, html);
-                                  }}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial ? "hover:bg-white hover:text-blue-900" : "hover:bg-white/[0.06] hover:text-blue-300"
-                                  )}
-                                  title="Tải xuống câu trả lời / báo cáo này dưới dạng file Microsoft Word (.doc)"
-                                >
-                                  <FileText size={11} className="shrink-0" />
-                                  <span>Word (.doc)</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    const docTitle =
-                                      m.deepResearch?.topic ||
-                                      messages[i - 1]?.content?.slice(0, 60) ||
-                                      `Báo cáo Atelier AI #${i + 1}`;
-                                    const html = `
-                                      <div class="paper-header">
-                                        <h1>${docTitle}</h1>
-                                        <div class="paper-date">${new Date().toLocaleDateString('vi-VN')}</div>
-                                      </div>
-                                      <div>${convertMarkdownWithMathToHtml(m.content)}</div>
-                                    `;
-                                    triggerCleanPdfPrint(docTitle, html, false);
-                                  }}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial ? "hover:bg-white hover:text-rose-900" : "hover:bg-white/[0.06] hover:text-rose-300"
-                                  )}
-                                  title="Xuất câu trả lời / báo cáo này ra PDF chuẩn in A4"
-                                >
-                                  <Printer size={11} className="shrink-0" />
-                                  <span>PDF</span>
-                                </button>
-
-                                <button 
-                                  onClick={() => handleAnalyzeEmergence(i, m.content)}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 text-xs font-medium leading-none transition-colors shrink-0",
-                                    isEditorial ? "hover:bg-white hover:text-purple-900" : "hover:bg-white/[0.06] hover:text-purple-300"
-                                  )}
-                                  disabled={m.emergenceAnalysis?.category === 'Analyzing'}
-                                >
-                                  {m.emergenceAnalysis?.category === 'Analyzing' ? (
+                                  {reflexionLoadingIndex === i ? (
                                     <Loader2 size={11} className="animate-spin text-purple-500 shrink-0" />
                                   ) : (
-                                    <Brain size={11} className="shrink-0" />
+                                    <Sparkles size={11} className="shrink-0" />
                                   )}
-                                  <span>Độ sâu</span>
+                                  <span>{m.selfEvaluation?.wasRefined ? 'Refined' : 'Refine'}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleForkSession(i)}
+                                  className={cn(
+                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
+                                    isEditorial
+                                      ? "hover:bg-black/5 hover:text-[#1e1d1b]"
+                                      : "hover:bg-white/[0.06] hover:text-white"
+                                  )}
+                                  title="Branch / Fork conversation from this message"
+                                >
+                                  <GitBranch size={11} className="shrink-0" />
+                                  <span>Fork</span>
                                 </button>
                               </div>
-                            </div>
+                            )}
 
                             {/* Suggested Follow-ups */}
                             {m.followUpQuestions && m.followUpQuestions.length > 0 && (
@@ -4178,12 +5592,31 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
             <div className={cn(
               "px-3 sm:px-4 pb-3 sm:pb-4 pt-2 shrink-0 z-20 border-t backdrop-blur-md transition-colors",
               isEditorial 
-                ? "bg-[#fbfaf8]/98 border-[#e8e4da]" 
-                : isMidnight
-                ? "bg-[#0a0e17]/98 border-[#172134]"
-                : "bg-[#0f1012]/98 border-[#1f2127]"
+                ? "bg-[#fafafa]/98 border-[#e4e4e7]" 
+                : "bg-[#09090b]/98 border-[#27272a]"
             )}>
               <div className={cn("relative", getChatContainerClass())}>
+                {/* Floating Stop Execution Pill */}
+                {isLoading && (
+                  <div className="flex items-center justify-center mb-2">
+                    <button
+                      type="button"
+                      onClick={handleStopExecution}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-medium border shadow-xs inline-flex items-center gap-1.5 transition-all animate-in fade-in zoom-in-95",
+                        isEditorial
+                          ? "bg-white hover:bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300"
+                          : "bg-[#18181b] hover:bg-rose-500/15 text-rose-300 border-rose-500/30 hover:border-rose-500/50"
+                      )}
+                      title="Stop generation (Esc)"
+                    >
+                      <Square size={10} className="fill-current text-rose-500 shrink-0" />
+                      <span>Stop generating</span>
+                      <kbd className="hidden sm:inline-block ml-1 text-[9px] font-mono px-1 py-0.5 rounded bg-black/5 dark:bg-white/10 opacity-70">Esc</kbd>
+                    </button>
+                  </div>
+                )}
+
                 {/* Attached Context & Image Previews */}
                 {(attachedContexts.length > 0 || selectedImages.length > 0) && (
                   <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
@@ -4229,17 +5662,17 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   if (!routeSuggestion) return null;
                   return (
                     <div className={cn(
-                      "mb-2 px-3 py-1.5 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-xs transition-all",
+                      "mb-2 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs transition-all",
                       isEditorial
                         ? "bg-amber-50/95 border-amber-300 text-amber-950"
                         : isMidnight
                         ? "bg-[#121d33]/95 border-sky-500/40 text-sky-200"
                         : "bg-[#141926]/95 border-blue-500/35 text-blue-200"
                     )}>
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <VectorIcon name={routeSuggestion.persona.emoji} size={13} className="shrink-0 text-amber-500" />
                         <span className="truncate text-[11px]">
-                          Phát hiện tác vụ <strong>{routeSuggestion.reason}</strong> — Chuyên gia tối ưu:{' '}
+                          Suggested: <strong>{routeSuggestion.reason}</strong>:{' '}
                           <strong>{routeSuggestion.persona.name}</strong>
                         </span>
                       </div>
@@ -4248,14 +5681,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           type="button"
                           onClick={() => selectPersona(routeSuggestion.persona)}
                           className={cn(
-                            "h-6 px-2.5 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1.5 transition-all shadow-2xs",
+                            "h-6 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 transition-all shadow-2xs",
                             isEditorial
                               ? "bg-amber-700 hover:bg-amber-800 text-white"
                               : "bg-sky-500 hover:bg-sky-400 text-white"
                           )}
                         >
                           <VectorIcon name={routeSuggestion.persona.emoji} size={11} />
-                          <span>Chuyển sang {routeSuggestion.persona.name}</span>
+                          <span>Switch</span>
                         </button>
                       </div>
                     </div>
@@ -4264,67 +5697,11 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
 
                 {/* Unified Command Deck Surface */}
                 <div className={cn(
-                  "rounded-2xl transition-all overflow-hidden border shadow-lg",
+                  "rounded-2xl transition-all overflow-hidden border shadow-sm",
                   isEditorial
-                    ? "bg-white/95 backdrop-blur-xl border-[#dfd8cc] shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
-                    : isMidnight
-                    ? "bg-[#0e1422]/95 backdrop-blur-xl border-[#1c2942] shadow-2xl"
-                    : "bg-[#0c0f17]/95 backdrop-blur-xl border-white/[0.08] shadow-2xl"
+                    ? "bg-white border-[#e4e4e7]"
+                    : "bg-[#121215] border-[#27272a]"
                 )}>
-                  {/* Active Cognitive Modes Status Strip */}
-                  {(settings.steadfastMode || settings.councilMode || settings.deepResearchMode) && (
-                    <div className={cn(
-                      "px-3.5 py-1.5 border-b flex items-center justify-between gap-2 text-[11px]",
-                      isEditorial 
-                        ? "bg-[#f7f3eb] border-[#e6e0d4]" 
-                        : isMidnight
-                        ? "bg-[#131b2e] border-[#1d2942]"
-                        : "bg-[#101420] border-white/[0.06]"
-                    )}>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn(
-                          "text-[10px] font-mono uppercase tracking-wider",
-                          isEditorial ? "text-[#7a7368]" : "text-[#687082]"
-                        )}>
-                          Chế độ kích hoạt:
-                        </span>
-                        {settings.steadfastMode && (
-                          <span className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            isEditorial ? "text-amber-800" : "text-amber-300"
-                          )}>
-                            <Shield size={11} className={isEditorial ? "text-amber-700" : "text-amber-400"} />
-                            <span>Steadfast (Phản biện Kiên định)</span>
-                          </span>
-                        )}
-                        {settings.councilMode && (
-                          <span className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            isEditorial ? "text-indigo-800" : "text-indigo-300"
-                          )}>
-                            <Users size={11} className={isEditorial ? "text-indigo-700" : "text-indigo-400"} />
-                            <span>AI Council (3 Chuyên gia)</span>
-                          </span>
-                        )}
-                        {settings.deepResearchMode && (
-                          <span className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            isEditorial ? "text-emerald-800" : "text-emerald-300"
-                          )}>
-                            <Compass size={11} className={isEditorial ? "text-emerald-700" : "text-emerald-400"} />
-                            <span>Deep Research (Đa tầng)</span>
-                          </span>
-                        )}
-                      </div>
-                      <span className={cn(
-                        "text-[10px] font-mono hidden sm:inline",
-                        isEditorial ? "text-[#8a8376]" : "text-[#687082]"
-                      )}>
-                        Active
-                      </span>
-                    </div>
-                  )}
-
                   <div className="p-2.5 sm:p-3">
                     {/* Tier 1: Auto-expanding Textarea */}
                     <textarea 
@@ -4332,6 +5709,16 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
+                        // 1. Ignore Enter during IME composition (Vietnamese Telex, Japanese, Korean)
+                        if (e.nativeEvent.isComposing) return;
+
+                        // 2. On mobile / phone keyboards, Enter must always insert a newline, NEVER send.
+                        // Message dispatch is confirmed only by tapping the Send button on the app.
+                        if (isMobileDevice()) {
+                          return;
+                        }
+
+                        // 3. On desktop with physical keyboard, Enter sends and Shift+Enter inserts a newline.
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
                           handleSend();
@@ -4339,26 +5726,26 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                       }}
                       placeholder={
                         settings.deepResearchMode
-                          ? "Nhập chủ đề cần nghiên cứu chuyên sâu đa tầng (Deep Research)..."
+                          ? "Enter research topic for autonomous multi-agent deep research..."
                           : settings.councilMode
-                          ? "Đặt câu hỏi chiến lược hoặc kỹ thuật cho Hội đồng 3 chuyên gia..."
-                          : "Đặt câu hỏi, yêu cầu phân tích chuyên sâu, hoặc thiết kế mã nguồn / sơ đồ..."
+                          ? "Pose a strategic or technical question for the 3-Expert Council..."
+                          : "Ask anything, request in-depth analysis, or design code / diagrams..."
                       }
                       className={cn(
                         "w-full bg-transparent border-none focus:ring-0 text-xs sm:text-[14px] py-1 px-1.5 resize-none max-h-44 min-h-[38px] focus:outline-none leading-relaxed",
                         isEditorial
-                          ? "text-[#1e1d1b] placeholder-[#90887c]"
-                          : "text-white placeholder-[#565d6d]"
+                          ? "text-[#18181b] placeholder-[#a1a1aa]"
+                          : "text-[#f4f4f5] placeholder-[#71717a]"
                       )}
                     />
 
                     {/* Tier 2: Integrated Studio Controls */}
                     <div className={cn(
-                      "flex items-center justify-between gap-2 pt-2 mt-1 border-t",
-                      isEditorial ? "border-[#ece6da]" : "border-white/[0.06]"
+                      "flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 pt-2 mt-1 border-t",
+                      isEditorial ? "border-[#f4f4f5]" : "border-[#1f1f23]"
                     )}>
                       {/* Left Controls: Attachments + Cognitive Engine Toggles */}
-                      <div className="flex items-center gap-1 flex-wrap">
+                      <div className="flex items-center gap-1 flex-wrap min-w-0">
                         {/* Context Attachment Dropdown Trigger */}
                         <div className="relative">
                           <button
@@ -4368,13 +5755,13 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                               "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
                               isEditorial
                                 ? isAttachMenuOpen 
-                                  ? "bg-amber-100 text-amber-900" 
-                                  : "text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]"
+                                  ? "bg-[#f4f4f5] text-[#18181b]" 
+                                  : "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
                                 : isAttachMenuOpen 
-                                ? "bg-white/[0.08] text-white" 
-                                : "text-[#858c9c] hover:text-white hover:bg-white/[0.06]"
+                                ? "bg-[#27272a] text-[#f4f4f5]" 
+                                : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                             )}
-                            title="Đính kèm Tài liệu / Ghi chú"
+                            title="Attach Documents / Notes"
                           >
                             <Paperclip size={14} className="shrink-0" />
                           </button>
@@ -4386,21 +5773,21 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 8, scale: 0.96 }}
                                 className={cn(
-                                  "absolute bottom-10 left-0 w-64 max-h-64 border rounded-xl shadow-2xl overflow-y-auto z-40 p-2.5 space-y-2.5 backdrop-blur-xl",
+                                  "absolute bottom-10 left-0 w-64 max-h-64 border rounded-xl shadow-xl overflow-y-auto z-40 p-2.5 space-y-2.5",
                                   isEditorial 
-                                    ? "bg-white/95 border-[#ded7ca] text-[#1e1d1b]" 
-                                    : "bg-[#0d1018]/95 border-white/[0.1] text-white"
+                                    ? "bg-white border-[#e4e4e7] text-[#18181b]" 
+                                    : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
                                 )}
                               >
                                 <div className={cn(
                                   "flex justify-between items-center pb-1 border-b",
-                                  isEditorial ? "border-[#ebe5d8]" : "border-white/[0.06]"
+                                  isEditorial ? "border-[#f4f4f5]" : "border-[#27272a]"
                                 )}>
                                   <span className={cn(
                                     "text-[10px] font-mono uppercase tracking-wider",
-                                    isEditorial ? "text-[#7a7368]" : "text-[#858c9c]"
+                                    isEditorial ? "text-[#71717a]" : "text-[#a1a1aa]"
                                   )}>
-                                    Đính kèm ngữ cảnh
+                                    Attach Context
                                   </span>
                                   <button onClick={() => setIsAttachMenuOpen(false)} className="opacity-60 hover:opacity-100">
                                     <X size={11} className="shrink-0" />
@@ -4409,12 +5796,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                 <div className="space-y-1">
                                   <span className={cn(
                                     "text-[9px] font-mono uppercase block px-1 font-semibold",
-                                    isEditorial ? "text-amber-800" : "text-blue-400"
+                                    isEditorial ? "text-[#52525b]" : "text-[#a1a1aa]"
                                   )}>
-                                    Tài liệu ({documents.length})
+                                    Documents ({documents.length})
                                   </span>
                                   {documents.length === 0 ? (
-                                    <span className="text-[11px] opacity-40 block px-1">Trống</span>
+                                    <span className="text-[11px] opacity-40 block px-1">Empty</span>
                                   ) : (
                                     documents.map(d => (
                                       <button
@@ -4422,10 +5809,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                         onClick={() => attachContextItem({ id: d.id, type: 'document', title: d.title, content: d.content })}
                                         className={cn(
                                           "w-full text-left p-1.5 rounded-lg text-xs flex items-center gap-2 truncate transition-colors",
-                                          isEditorial ? "hover:bg-amber-50 text-[#36322b]" : "hover:bg-white/[0.06] text-slate-300"
+                                          isEditorial ? "hover:bg-[#f4f4f5] text-[#18181b]" : "hover:bg-[#1f1f23] text-[#e4e4e7]"
                                         )}
                                       >
-                                        <FileText size={12} className={cn("shrink-0", isEditorial ? "text-amber-800" : "text-blue-400")} />
+                                        <FileText size={12} className="shrink-0 opacity-70" />
                                         <span className="truncate flex-1">{d.title}</span>
                                       </button>
                                     ))
@@ -4433,16 +5820,16 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                 </div>
                                 <div className={cn(
                                   "space-y-1 pt-1 border-t",
-                                  isEditorial ? "border-[#ebe5d8]" : "border-white/[0.06]"
+                                  isEditorial ? "border-[#f4f4f5]" : "border-[#27272a]"
                                 )}>
                                   <span className={cn(
                                     "text-[9px] font-mono uppercase block px-1 font-semibold",
-                                    isEditorial ? "text-amber-800" : "text-amber-400"
+                                    isEditorial ? "text-[#52525b]" : "text-[#a1a1aa]"
                                   )}>
-                                    Ghi chú ({notes.length})
+                                    Notes ({notes.length})
                                   </span>
                                   {notes.length === 0 ? (
-                                    <span className="text-[11px] opacity-40 block px-1">Trống</span>
+                                    <span className="text-[11px] opacity-40 block px-1">Empty</span>
                                   ) : (
                                     notes.map(n => (
                                       <button
@@ -4450,10 +5837,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                                         onClick={() => attachContextItem({ id: n.id, type: 'note', title: n.title, content: n.content })}
                                         className={cn(
                                           "w-full text-left p-1.5 rounded-lg text-xs flex items-center gap-2 truncate transition-colors",
-                                          isEditorial ? "hover:bg-amber-50 text-[#36322b]" : "hover:bg-white/[0.06] text-slate-300"
+                                          isEditorial ? "hover:bg-[#f4f4f5] text-[#18181b]" : "hover:bg-[#1f1f23] text-[#e4e4e7]"
                                         )}
                                       >
-                                        <NotebookIcon size={12} className={cn("shrink-0", isEditorial ? "text-amber-800" : "text-amber-400")} />
+                                        <NotebookIcon size={12} className="shrink-0 opacity-70" />
                                         <span className="truncate flex-1">{n.title}</span>
                                       </button>
                                     ))
@@ -4471,10 +5858,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           className={cn(
                             "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
                             isEditorial 
-                              ? "text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]" 
-                              : "text-[#858c9c] hover:text-white hover:bg-white/[0.06]"
+                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
+                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Tải ảnh lên"
+                          title="Upload Image"
                         >
                           <ImageIcon size={14} className="shrink-0" />
                         </button>
@@ -4496,20 +5883,20 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             isRecording 
                               ? "bg-red-500/20 text-red-500 animate-pulse" 
                               : isEditorial 
-                              ? "text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]" 
-                              : "text-[#858c9c] hover:text-white hover:bg-white/[0.06]"
+                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
+                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title={isRecording ? "Dừng ghi âm" : "Nhập bằng giọng nói"}
+                          title={isRecording ? "Stop Recording" : "Voice Input"}
                         >
                           <Mic size={14} className="shrink-0" />
                         </button>
 
                         <span className={cn(
                           "h-4 w-[1px] mx-1 my-auto inline-block shrink-0",
-                          isEditorial ? "bg-[#ded7ca]" : "bg-white/[0.08]"
+                          isEditorial ? "bg-[#e4e4e7]" : "bg-[#27272a]"
                         )} />
 
-                        {/* Cognitive Mode Switches - Perfectly Height Aligned & Responsive */}
+                        {/* Minimalist Cognitive Mode Switches with Semantic Active Accents */}
                         <button
                           type="button"
                           onClick={() => setSettings(prev => ({ ...prev, steadfastMode: !prev.steadfastMode }))}
@@ -4517,15 +5904,15 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
                             settings.steadfastMode
                               ? isEditorial
-                                ? "bg-amber-100 border-amber-300 text-amber-900 shadow-xs font-semibold"
-                                : "bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-xs font-semibold"
+                                ? "bg-amber-50 border-amber-300 text-amber-900 font-semibold"
+                                : "bg-amber-500/15 border-amber-500/35 text-amber-300 font-semibold"
                               : isEditorial
-                              ? "border-transparent text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]"
-                              : "border-transparent text-[#858c9c] hover:text-slate-200 hover:bg-white/[0.05]"
+                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
+                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Tư duy phản biện kiên định (Steadfast Mode)"
+                          title="Steadfast Epistemic Mode (Anti-Sycophancy)"
                         >
-                          <Shield size={12} className={cn("shrink-0", settings.steadfastMode ? (isEditorial ? "text-amber-800" : "text-amber-400") : "opacity-60")} />
+                          <Shield size={12} className={cn("shrink-0", settings.steadfastMode ? (isEditorial ? "text-amber-600" : "text-amber-400") : "")} />
                           <span className="hidden sm:inline">Steadfast</span>
                         </button>
 
@@ -4536,15 +5923,15 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
                             settings.councilMode
                               ? isEditorial
-                                ? "bg-indigo-100 border-indigo-300 text-indigo-900 shadow-xs font-semibold"
-                                : "bg-indigo-500/15 border-indigo-500/35 text-indigo-200 shadow-xs font-semibold"
+                                ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-semibold"
+                                : "bg-indigo-500/15 border-indigo-500/35 text-indigo-300 font-semibold"
                               : isEditorial
-                              ? "border-transparent text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]"
-                              : "border-transparent text-[#858c9c] hover:text-slate-200 hover:bg-white/[0.05]"
+                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
+                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Hội đồng 3 chuyên gia phản biện song song (AI Council)"
+                          title="AI Council (3 Dialectical Experts)"
                         >
-                          <Users size={12} className={cn("shrink-0", settings.councilMode ? (isEditorial ? "text-indigo-800" : "text-indigo-400") : "opacity-60")} />
+                          <Users size={12} className={cn("shrink-0", settings.councilMode ? (isEditorial ? "text-indigo-600" : "text-indigo-400") : "")} />
                           <span className="hidden sm:inline">Council</span>
                         </button>
 
@@ -4555,109 +5942,42 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
                             settings.deepResearchMode
                               ? isEditorial
-                                ? "bg-emerald-100 border-emerald-300 text-emerald-900 shadow-xs font-semibold"
-                                : "bg-emerald-500/15 border-emerald-500/35 text-emerald-200 shadow-xs font-semibold"
+                                ? "bg-sky-50 border-sky-300 text-sky-900 font-semibold"
+                                : "bg-sky-500/15 border-sky-500/35 text-sky-300 font-semibold"
                               : isEditorial
-                              ? "border-transparent text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]"
-                              : "border-transparent text-[#858c9c] hover:text-slate-200 hover:bg-white/[0.05]"
+                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
+                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Nghiên cứu đa tầng tự động (Deep Research)"
+                          title="Deep Research (Autonomous Multi-Agent)"
                         >
-                          <Compass size={12} className={cn("shrink-0", settings.deepResearchMode ? (isEditorial ? "text-emerald-800" : "text-emerald-400") : "opacity-60")} />
+                          <Compass size={12} className={cn("shrink-0", settings.deepResearchMode ? (isEditorial ? "text-sky-600" : "text-sky-400") : "")} />
                           <span className="hidden sm:inline">Research</span>
                         </button>
-
-                        {/* Composer Inline Model Switcher (Hybrid / Pro / Flash) */}
-                        <div className="relative flex items-center shrink-0">
-                          <select
-                            value={settings.model || 'auto-hybrid'}
-                            onChange={(e) => setSettings(prev => ({ ...prev, model: e.target.value }))}
-                            className={cn(
-                              "h-8 rounded-lg pl-2 pr-5 text-[11px] font-semibold cursor-pointer transition-all border focus:outline-none appearance-none leading-none",
-                              (settings.model || '').includes('pro') || settings.model === 'gemini-4-argon'
-                                ? isEditorial
-                                  ? "bg-purple-100/90 border-purple-300 text-purple-900"
-                                  : "bg-purple-500/15 border-purple-500/35 text-purple-200"
-                                : settings.model === 'auto-hybrid'
-                                ? isEditorial
-                                  ? "bg-emerald-100/90 border-emerald-300 text-emerald-900"
-                                  : "bg-emerald-500/15 border-emerald-500/35 text-emerald-200"
-                                : isEditorial
-                                ? "bg-black/[0.03] border-[#e2ddd3] text-[#4a453d] hover:border-amber-600/40"
-                                : "bg-white/[0.04] border-white/10 text-slate-300 hover:border-white/20"
-                            )}
-                            title="Đổi nhanh mô hình Gemini (Auto Hybrid / Pro / Flash)"
-                          >
-                            <optgroup label="TIẾT KIỆM QUOTA (Hybrid)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                              {AVAILABLE_MODELS.filter(m => m.tier === 'hybrid').map(m => (
-                                <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                                  {m.shortLabel}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="DÒNG PRO (Suy luận sâu)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                              {AVAILABLE_MODELS.filter(m => m.tier === 'pro').map(m => (
-                                <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                                  {m.shortLabel}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="DÒNG FLASH (Tốc độ cao)" className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                              {AVAILABLE_MODELS.filter(m => m.tier === 'flash').map(m => (
-                                <option key={m.id} value={m.id} className={isEditorial ? "bg-white text-black" : "bg-[#14161d] text-white"}>
-                                  {m.shortLabel}
-                                </option>
-                              ))}
-                            </optgroup>
-                          </select>
-                          <ChevronDown size={11} className="absolute right-1.5 pointer-events-none opacity-60 shrink-0" />
-                        </div>
                       </div>
 
-                      {/* Right Controls: LaTeX Paper Studio, Canvas Trigger, Auto-Speak, Enhance Wand & Send */}
+                      {/* Right Controls: Canvas Trigger, Auto-Speak, Enhance Wand & Send */}
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={() =>
                             openInCanvas({
-                              type: 'latex',
-                              code:
+                              type:
                                 input.trim().includes('\\documentclass') || input.trim().includes('\\section')
-                                  ? input.trim()
-                                  : LATEX_TEMPLATES[0].code,
-                              title: 'LaTeX Academic Paper (.tex)'
+                                  ? 'latex'
+                                  : 'markdown',
+                              code: input.trim() || '# New Document / Code\n\nEnter content or instruct AI to edit here...',
+                              title: 'Interactive Canvas'
                             })
                           }
                           className={cn(
                             "hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors shrink-0 leading-none border",
                             isEditorial
-                              ? "bg-emerald-50/80 border-emerald-200 text-emerald-900 hover:bg-emerald-100"
-                              : "bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20"
+                              ? "border-[#e4e4e7] text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5]"
+                              : "border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Mở LaTeX Paper Studio (Soạn thảo & xem bản in bài báo khoa học IEEE/ACM/Nature với KaTeX)"
+                          title="Open Canvas Workspace (Markdown, Code & LaTeX)"
                         >
-                          <Sigma size={12} className="shrink-0" />
-                          <span>LaTeX Paper</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openInCanvas({
-                              type: 'markdown',
-                              code: input.trim() || '# Tài liệu / Code Mới\n\nNhập nội dung hoặc yêu cầu AI biên tập trực tiếp tại đây...',
-                              title: 'Interactive Canvas'
-                            })
-                          }
-                          className={cn(
-                            "hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors shrink-0 leading-none",
-                            isEditorial
-                              ? "text-[#6b6459] hover:text-amber-900 hover:bg-black/[0.04]"
-                              : "text-[#858c9c] hover:text-sky-300 hover:bg-white/[0.05]"
-                          )}
-                          title="Mở bảng đồng sáng tạo Interactive Canvas"
-                        >
-                          <Edit3 size={12} className={cn("shrink-0", isEditorial ? "text-amber-800" : "text-sky-400")} />
+                          <Edit3 size={12} className={cn("shrink-0", isEditorial ? "text-indigo-600" : "text-indigo-400")} />
                           <span>Canvas</span>
                         </button>
 
@@ -4667,12 +5987,12 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           className={cn(
                             "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
                             isAutoSpeak 
-                              ? isEditorial ? "text-amber-900 bg-amber-100" : "text-blue-400 bg-blue-500/15" 
+                              ? isEditorial ? "text-emerald-700 bg-emerald-50" : "text-emerald-400 bg-emerald-500/15" 
                               : isEditorial 
-                              ? "text-[#6b6459] hover:text-[#1e1d1b] hover:bg-black/[0.04]" 
-                              : "text-[#858c9c] hover:text-slate-200 hover:bg-white/[0.05]"
+                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
+                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
                           )}
-                          title="Tự động đọc phản hồi (Auto-Speak)"
+                          title="Auto-Speak Responses"
                         >
                           {isAutoSpeak ? <Volume2 size={13} className="shrink-0" /> : <VolumeX size={13} className="shrink-0" />}
                         </button>
@@ -4685,35 +6005,72 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                             className={cn(
                               "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
                               isEditorial
-                                ? "text-[#6b6459] hover:text-amber-900 hover:bg-black/[0.04]"
-                                : "text-[#858c9c] hover:text-blue-400 hover:bg-white/[0.05]",
-                              isEnhancing && "animate-spin text-amber-600"
+                                ? "text-violet-600 hover:bg-violet-50"
+                                : "text-violet-400 hover:bg-violet-500/15",
+                              isEnhancing && "animate-spin opacity-60"
                             )}
-                            title="Tối ưu hóa câu lệnh (Prompt Optimizer)"
+                            title="Optimize Prompt"
                           >
                             <Wand2 size={14} className="shrink-0" />
                           </button>
                         )}
 
-                        <button 
-                          onClick={() => handleSend()}
-                          disabled={(!input.trim() && selectedImages.length === 0) || isLoading}
-                          className={cn(
-                            "h-8 px-3.5 rounded-lg text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none",
-                            (input.trim() || selectedImages.length > 0) && !isLoading 
-                              ? isEditorial
-                                ? "bg-gradient-to-b from-[#2b2723] to-[#161412] text-white hover:from-[#3a3530] hover:to-[#221f1b] shadow-sm active:scale-95"
-                                : isMidnight
-                                ? "bg-gradient-to-b from-sky-500 to-sky-600 text-white hover:from-sky-400 hover:to-sky-500 shadow-md active:scale-95"
-                                : "bg-gradient-to-b from-blue-500 to-blue-600 text-white hover:from-blue-400 hover:to-blue-500 shadow-md active:scale-95"
-                              : isEditorial
-                              ? "bg-black/[0.05] text-[#a8a196] cursor-not-allowed"
-                              : "bg-white/[0.05] text-[#4c515e] cursor-not-allowed"
-                          )}
-                        >
-                          {isLoading ? <Loader2 size={13} className="animate-spin shrink-0" /> : <Send size={13} className="shrink-0" />}
-                          <span className="hidden xs:inline">Gửi</span>
-                        </button>
+                        {input.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!input.trim()) return;
+                              const currentText = input.trim();
+                              batchQueue.enqueueTask(
+                                'deep_research',
+                                `Deep Research: ${currentText.slice(0, 48)}...`,
+                                'Autonomous multi-agent research executed in background batch queue',
+                                { query: currentText, targetFormat: 'imrad_q1' }
+                              );
+                              setInput('');
+                            }}
+                            className={cn(
+                              "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-all shrink-0 leading-none",
+                              isEditorial
+                                ? "bg-[#f4f4f5] hover:bg-[#e4e4e7] border-[#e4e4e7] text-[#18181b]"
+                                : "bg-[#1f1f23] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                            )}
+                            title="Enqueue in Background Batch Queue without blocking chat"
+                          >
+                            <Layers size={12} className={cn("shrink-0", isEditorial ? "text-cyan-600" : "text-cyan-400")} />
+                            <span className="hidden sm:inline">Run Background</span>
+                          </button>
+                        )}
+
+                        {isLoading ? (
+                          <button 
+                            type="button"
+                            onClick={handleStopExecution}
+                            className="h-8 px-3.5 rounded-lg text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none shadow-xs bg-rose-600 text-white hover:bg-rose-500 active:scale-95"
+                            title="Stop execution (Esc)"
+                          >
+                            <Square size={12} className="shrink-0 fill-current" />
+                            <span>Stop</span>
+                          </button>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => handleSend()}
+                            disabled={!input.trim() && selectedImages.length === 0}
+                            className={cn(
+                              "h-8 px-3.5 rounded-lg text-xs font-medium transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none",
+                              (input.trim() || selectedImages.length > 0)
+                                ? "bg-indigo-600 text-white hover:bg-indigo-500 active:scale-95 shadow-2xs"
+                                : isEditorial
+                                ? "bg-[#f4f4f5] text-[#a1a1aa] cursor-not-allowed"
+                                : "bg-[#1f1f23] text-[#52525b] cursor-not-allowed"
+                            )}
+                            title="Send message"
+                          >
+                            <Send size={13} className="shrink-0" />
+                            <span className="hidden xs:inline">Send</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -4770,21 +6127,19 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.96, opacity: 0 }}
               className={cn(
-                "border rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl max-h-[88vh] overflow-y-auto backdrop-blur-xl",
+                "border rounded-2xl w-full max-w-md p-6 relative z-10 shadow-2xl max-h-[88vh] overflow-y-auto",
                 isEditorial 
-                  ? "bg-[#faf7f0] border-[#ded7ca] text-[#1e1d1b]" 
-                  : isMidnight
-                  ? "bg-[#0e1524] border-[#1d2942] text-white"
-                  : "bg-[#0e111a] border-white/[0.1] text-white"
+                  ? "bg-white border-[#e4e4e7] text-[#18181b]" 
+                  : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
               )}
             >
               <div className={cn(
                 "flex items-center justify-between pb-4 mb-4 border-b",
-                isEditorial ? "border-[#ded7ca]" : "border-white/[0.07]"
+                isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]"
               )}>
                 <h3 className="text-sm font-display font-semibold flex items-center gap-2">
-                  <SettingsIcon size={15} className={isEditorial ? "text-amber-800" : "text-blue-400"} />
-                  <span>Tài khoản, Cá nhân hóa & Hệ thống</span>
+                  <SettingsIcon size={15} className="opacity-70" />
+                  <span>Account & System Settings</span>
                 </h3>
                 <button onClick={() => setIsSettingsOpen(false)} className="p-1 rounded-lg opacity-60 hover:opacity-100 transition-colors">
                   <X size={16} />
@@ -4792,10 +6147,10 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               </div>
 
               <div className="space-y-4">
-                {/* 1. Unified Account, Cloud Sync & Logout Card (Moved from Sidebar Footer) */}
+                {/* 1. Unified Account & Real-Time Cloud Status Card */}
                 <div className={cn(
-                  "p-3.5 rounded-xl border space-y-3 shadow-xs",
-                  isEditorial ? "bg-white border-[#ded7ca]" : "bg-white/[0.03] border-white/10"
+                  "p-3.5 rounded-xl border space-y-3",
+                  isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
                 )}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -4804,10 +6159,16 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           src={firebaseUser.photoURL}
                           alt={formatCompactUserName(userId, firebaseUser)}
                           referrerPolicy="no-referrer"
-                          className="w-9 h-9 rounded-full object-cover shrink-0 border border-emerald-500/40"
+                          className={cn(
+                            "w-9 h-9 rounded-full object-cover shrink-0 border",
+                            isEditorial ? "border-[#d4d4d8]" : "border-[#3f3f46]"
+                          )}
                         />
                       ) : (
-                        <div className="w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-500 flex items-center justify-center text-xs font-bold shrink-0 border border-emerald-500/30">
+                        <div className={cn(
+                          "w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 border",
+                          isEditorial ? "bg-[#e4e4e7] text-[#18181b] border-[#d4d4d8]" : "bg-[#27272a] text-[#f4f4f5] border-[#3f3f46]"
+                        )}>
                           {formatCompactUserName(userId, firebaseUser).slice(0, 1).toUpperCase()}
                         </div>
                       )}
@@ -4816,75 +6177,60 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           {formatCompactUserName(userId, firebaseUser)}
                         </div>
                         <div className="text-[10px] opacity-65 flex items-center gap-1.5">
-                          <span className={cn("w-1.5 h-1.5 rounded-full", firebaseUser ? "bg-emerald-500" : "bg-amber-500")} />
-                          <span>{firebaseUser ? 'Đã kết nối Firebase Cloud' : 'Phiên lưu trữ cục bộ'}</span>
+                          <span className={cn(
+                            "w-1.5 h-1.5 rounded-full",
+                            isSyncingCloud ? "bg-zinc-400 animate-pulse" : "bg-emerald-500"
+                          )} />
+                          <span>
+                            {isSyncingCloud
+                              ? 'Syncing cloud data...'
+                              : 'Real-time cloud sync active'}
+                          </span>
                         </div>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {!firebaseUser ? (
-                        <button
-                          type="button"
-                          onClick={handleGoogleSignIn}
-                          className={cn(
-                            "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-1.5",
-                            isEditorial
-                              ? "bg-sky-50 text-sky-900 border-sky-200 hover:bg-sky-100"
-                              : "bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25"
-                          )}
-                        >
-                          <Cloud size={13} />
-                          <span>Đồng bộ Cloud</span>
-                        </button>
-                      ) : (
-                        <span
-                          className={cn(
-                            "px-2 py-1 rounded-lg text-[10px] font-mono flex items-center gap-1 border",
-                            isEditorial
-                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                              : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                          )}
-                        >
-                          <Cloud size={11} />
-                          <span>Cloud Sync</span>
-                        </span>
-                      )}
                       <button
                         type="button"
                         onClick={() => {
                           setIsSettingsOpen(false);
                           handleLogout();
                         }}
-                        className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
-                        title="Đăng xuất khỏi phiên làm việc"
+                        className={cn(
+                          "px-2.5 py-1.5 border rounded-lg text-xs font-medium transition-colors flex items-center gap-1",
+                          isEditorial
+                            ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#52525b] hover:text-[#18181b]"
+                            : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5]"
+                        )}
+                        title="Sign out from current session"
                       >
                         <LogOut size={12} />
-                        <span>Đăng xuất</span>
+                        <span>Sign Out</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* 2. Personalization & AI Identity Card (Moved from Sidebar Footer) */}
+                {/* 2. Personalization & AI Identity Card */}
                 <div className={cn(
-                  "p-3.5 rounded-xl border space-y-3 shadow-xs",
-                  isEditorial ? "bg-white border-[#ded7ca]" : "bg-white/[0.03] border-white/10"
+                  "p-3.5 rounded-xl border space-y-3",
+                  isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
                 )}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className={cn(
-                        "w-9 h-9 rounded-xl flex items-center justify-center border shadow-xs shrink-0",
-                        isEditorial ? "bg-amber-100/80 border-amber-300 text-amber-900" : "bg-sky-500/15 border-sky-400/30 text-sky-300"
+                        "w-9 h-9 rounded-xl flex items-center justify-center border shrink-0",
+                        isEditorial ? "bg-white border-[#e4e4e7] text-[#18181b]" : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
                       )}>
                         <VectorIcon name={settings.aiIdentity?.avatar || 'brain'} size={17} />
                       </div>
                       <div className="min-w-0">
                         <span className="text-xs font-semibold block truncate">
-                          Cá nhân hóa & Định danh AI ({settings.aiIdentity?.name || 'Gemini Atelier'})
+                          AI Identity & Personalization ({settings.aiIdentity?.name || 'Gemini Atelier'})
                         </span>
                         <p className="text-[10px] opacity-60 truncate">
-                          {settings.aiIdentity?.title || 'Cố vấn Trí tuệ'} • Xưng hô: {settings.aiIdentity?.pronounAI || 'Tôi'} - {settings.aiIdentity?.pronounUser || 'Bạn'}
+                          {settings.aiIdentity?.title || 'Cognitive Partner'} • Address: {settings.aiIdentity?.pronounAI || 'I'} - {settings.aiIdentity?.pronounUser || 'You'}
                         </p>
                       </div>
                     </div>
@@ -4895,19 +6241,19 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         setIsIdentityModalOpen(true);
                       }}
                       className={cn(
-                        "px-2.5 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all shadow-xs shrink-0",
+                        "px-2.5 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all shrink-0",
                         isEditorial
-                          ? "bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-900"
-                          : "bg-sky-500/15 hover:bg-sky-500/25 border-sky-400/30 text-sky-300"
+                          ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                          : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
                       )}
                     >
-                      <span>Tùy chỉnh</span>
+                      <span>Customize</span>
                     </button>
                   </div>
 
-                  <div className={cn("grid grid-cols-2 gap-2.5 pt-2.5 border-t", isEditorial ? "border-[#e6e1d6]" : "border-white/10")}>
+                  <div className={cn("grid grid-cols-2 gap-2.5 pt-2.5 border-t", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium opacity-75">Tên hiển thị của bạn</label>
+                      <label className="text-[11px] font-medium opacity-75">Your Display Name</label>
                       <input 
                         type="text"
                         value={settings.userRoleName || ''}
@@ -4915,14 +6261,14 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         className={cn(
                           "w-full border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none",
                           isEditorial 
-                            ? "bg-[#faf8f4] border-[#ded7ca] text-[#1e1d1b] focus:border-amber-600" 
-                            : "bg-[#07090e] border-white/[0.08] text-white focus:border-blue-500"
+                            ? "bg-white border-[#e4e4e7] text-[#18181b] focus:border-[#71717a]" 
+                            : "bg-[#121215] border-[#27272a] text-[#f4f4f5] focus:border-[#52525b]"
                         )}
-                        placeholder="VD: Bạn"
+                        placeholder="e.g., Alex"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium opacity-75">Tên gọi AI</label>
+                      <label className="text-[11px] font-medium opacity-75">AI Assistant Name</label>
                       <input 
                         type="text"
                         value={settings.aiRoleName || ''}
@@ -4930,8 +6276,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         className={cn(
                           "w-full border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none",
                           isEditorial 
-                            ? "bg-[#faf8f4] border-[#ded7ca] text-[#1e1d1b] focus:border-amber-600" 
-                            : "bg-[#07090e] border-white/[0.08] text-white focus:border-blue-500"
+                            ? "bg-white border-[#e4e4e7] text-[#18181b] focus:border-[#71717a]" 
+                            : "bg-[#121215] border-[#27272a] text-[#f4f4f5] focus:border-[#52525b]"
                         )}
                         placeholder="VD: Gemini"
                       />
@@ -4939,20 +6285,156 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   </div>
                 </div>
 
-                {/* 3. Deep Engine & Context Settings (Non-redundant items only) */}
+                {/* 3. FinOps, API Tier & Financial Control Center */}
                 <div className={cn(
-                  "p-3.5 rounded-xl border space-y-3 shadow-xs",
-                  isEditorial ? "bg-white border-[#ded7ca]" : "bg-white/[0.03] border-white/10"
+                  "p-3.5 rounded-xl border space-y-3",
+                  isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
                 )}>
-                  {/* Smart Quota Optimizer Toggle */}
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <span className="text-xs font-semibold flex items-center gap-1.5">
-                        <Zap size={13} className="text-emerald-500" />
-                        <span>Tối ưu Quota Thông minh (Smart Hybrid Saver)</span>
+                        <Activity size={13} className="text-emerald-500 shrink-0" />
+                        <span>FinOps, API Tier & Quota Control Center</span>
                       </span>
                       <p className="text-[10px] opacity-65 leading-snug">
-                        Giảm 75–85% Quota Pro: Chuyển tác vụ phụ sang Flash Lite & nén ngữ cảnh cửa sổ trượt
+                        Control Free vs. Paid API routing, per-turn API call multiplier, and live token/cost telemetry
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={resetFinopsTelemetry}
+                      className={cn(
+                        "px-2 py-1 rounded-lg border text-[10px] font-medium transition-colors shrink-0",
+                        isEditorial
+                          ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#52525b]"
+                          : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#a1a1aa]"
+                      )}
+                      title="Reset session telemetry counters"
+                    >
+                      Reset Counter
+                    </button>
+                  </div>
+
+                  {/* Operating Tier Mode Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-medium opacity-80 block">
+                      1. Operating Billing Tier Mode
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        {
+                          id: 'free_tier_lock',
+                          title: 'Free Tier Lock ($0)',
+                          badge: '0 USD Guaranteed',
+                          desc: 'Locks strictly to Flash 3.8 & Flash-Lite (Free Tier eligible). Blocks Paid-only Pro calls.',
+                        },
+                        {
+                          id: 'smart_hybrid',
+                          title: 'Smart Hybrid',
+                          badge: 'Recommended',
+                          desc: 'Routes 80% of turns & background tasks to Flash/Lite; uses Pro only for complex STEM.',
+                        },
+                        {
+                          id: 'paid_pro',
+                          title: 'Paid Pro Unlocked',
+                          badge: 'Pay-as-you-go',
+                          desc: 'Full unrestricted access to Gemini 4 Pro + multi-agent pipelines (requires Cloud Billing).',
+                        },
+                      ].map((mode) => {
+                        const isSelected = (settings.billingTierMode || 'smart_hybrid') === mode.id;
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => {
+                              setSettings((prev) => ({
+                                ...prev,
+                                billingTierMode: mode.id as any,
+                                model:
+                                  mode.id === 'free_tier_lock' && prev.model === 'gemini-4-argon'
+                                    ? 'gemini-3.8-flash'
+                                    : mode.id === 'paid_pro' && prev.model === 'gemini-3.8-flash'
+                                    ? 'auto-hybrid'
+                                    : prev.model,
+                                skipBackgroundCalls:
+                                  mode.id === 'free_tier_lock' ? true : prev.skipBackgroundCalls,
+                                smartQuotaMode:
+                                  mode.id === 'free_tier_lock' ? true : prev.smartQuotaMode,
+                              }));
+                            }}
+                            className={cn(
+                              "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between gap-1",
+                              isSelected
+                                ? isEditorial
+                                  ? "bg-emerald-50/70 border-emerald-500 text-[#18181b]"
+                                  : "bg-emerald-500/10 border-emerald-500/50 text-[#f4f4f5]"
+                                : isEditorial
+                                ? "bg-white border-[#e4e4e7] hover:bg-[#f4f4f5]/60"
+                                : "bg-[#121215] border-[#27272a] hover:bg-[#27272a]/50"
+                            )}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[11px] font-semibold leading-tight">{mode.title}</span>
+                                {isSelected && <Check size={12} className="text-emerald-500 shrink-0" />}
+                              </div>
+                              <span className="inline-block text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500">
+                                {mode.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] opacity-65 leading-snug">{mode.desc}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Single-Call Economy Mode Toggle */}
+                  <div className={cn("flex items-center justify-between gap-2 pt-2.5 border-t", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
+                    <div>
+                      <span className="text-xs font-semibold flex items-center gap-1.5">
+                        <Shield size={13} className="text-indigo-500 shrink-0" />
+                        <span>Single-Call Economy Mode (1 Message = 1 API Call)</span>
+                      </span>
+                      <p className="text-[10px] opacity-65 leading-snug">
+                        Skips background emotion analysis & follow-up question API calls after each message — saves 65–75% RPM & token quota
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          skipBackgroundCalls: !(prev.skipBackgroundCalls || prev.billingTierMode === 'free_tier_lock'),
+                        }))
+                      }
+                      className={cn(
+                        "w-9 h-5 rounded-full transition-colors relative shrink-0",
+                        settings.skipBackgroundCalls || settings.billingTierMode === 'free_tier_lock'
+                          ? "bg-emerald-600"
+                          : isEditorial
+                          ? "bg-[#d4d4d8]"
+                          : "bg-[#27272a]"
+                      )}
+                    >
+                      <motion.div
+                        animate={{
+                          x: settings.skipBackgroundCalls || settings.billingTierMode === 'free_tier_lock' ? 18 : 2,
+                        }}
+                        className="absolute top-1 w-3 h-3 rounded-full shadow-xs bg-white"
+                      />
+                    </button>
+                  </div>
+
+                  {/* Smart Quota Optimizer Toggle */}
+                  <div className={cn("flex items-center justify-between gap-2 pt-2.5 border-t", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
+                    <div>
+                      <span className="text-xs font-semibold flex items-center gap-1.5">
+                        <Zap size={13} className="text-emerald-500 shrink-0" />
+                        <span>Smart Context Compaction & Hybrid Routing</span>
+                      </span>
+                      <p className="text-[10px] opacity-65 leading-snug">
+                        Compacts distant history turns using High-Entropy Anchors & caches auxiliary prompts for 30 min
                       </p>
                     </div>
                     <button
@@ -4962,57 +6444,158 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                         "w-9 h-5 rounded-full transition-colors relative shrink-0",
                         settings.smartQuotaMode !== false
                           ? "bg-emerald-600"
-                          : isEditorial ? "bg-[#d8d1c4]" : "bg-[#232733]"
+                          : isEditorial ? "bg-[#d4d4d8]" : "bg-[#27272a]"
                       )}
                     >
                       <motion.div
                         animate={{ x: settings.smartQuotaMode !== false ? 18 : 2 }}
-                        className="absolute top-1 w-3 h-3 bg-white rounded-full shadow-xs"
+                        className="absolute top-1 w-3 h-3 rounded-full shadow-xs bg-white"
                       />
                     </button>
                   </div>
 
+                  {/* Live Usage & Financial Telemetry Grid */}
+                  <div className={cn("pt-2.5 border-t space-y-2.5", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium opacity-80">
+                        Live Session API Telemetry & Cost Estimator
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-500 font-semibold">
+                        {settings.billingTierMode === 'free_tier_lock'
+                          ? '$0.0000 (Free Tier Locked)'
+                          : `Est. $${(finopsTelemetry?.estimatedCostUsd ?? 0).toFixed(4)} / $${(settings.monthlyBudgetUsd ?? 10).toFixed(2)} budget`}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className={cn("p-2 rounded-lg border", isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]")}>
+                        <span className="text-[10px] opacity-60 block">API Calls</span>
+                        <span className="text-xs font-mono font-bold">{finopsTelemetry?.totalCalls ?? 0}</span>
+                      </div>
+                      <div className={cn("p-2 rounded-lg border", isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]")}>
+                        <span className="text-[10px] opacity-60 block">Cache Saved</span>
+                        <span className="text-xs font-mono font-bold text-emerald-500">{finopsTelemetry?.cachedCallsSaved ?? 0}</span>
+                      </div>
+                      <div className={cn("p-2 rounded-lg border", isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]")}>
+                        <span className="text-[10px] opacity-60 block">Est. Tokens</span>
+                        <span className="text-xs font-mono font-bold">
+                          {(((finopsTelemetry?.estimatedInputTokens ?? 0) + (finopsTelemetry?.estimatedOutputTokens ?? 0)) / 1000).toFixed(1)}k
+                        </span>
+                      </div>
+                      <div className={cn("p-2 rounded-lg border", isEditorial ? "bg-white border-[#e4e4e7]" : "bg-[#121215] border-[#27272a]")}>
+                        <span className="text-[10px] opacity-60 block">Auto-Fallbacks</span>
+                        <span className="text-xs font-mono font-bold text-amber-500">{finopsTelemetry?.fallbackCount ?? 0}</span>
+                      </div>
+                    </div>
+
+                    {/* Monthly Soft Budget Slider */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="opacity-75">Monthly Reference Budget Alert Threshold (USD)</span>
+                        <span className="font-mono font-semibold">${settings.monthlyBudgetUsd ?? 10} USD</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={settings.monthlyBudgetUsd ?? 10}
+                        onChange={(e) => setSettings({ ...settings, monthlyBudgetUsd: parseInt(e.target.value, 10) })}
+                        className={cn(
+                          "w-full h-1.5 rounded-lg accent-emerald-600",
+                          isEditorial ? "bg-[#e4e4e7]" : "bg-[#27272a]"
+                        )}
+                      />
+                    </div>
+
+                    {/* Official Google AI Studio & Cloud Billing Management Links */}
+                    <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-lg border text-[10px] font-medium inline-flex items-center gap-1 transition-colors",
+                          isEditorial
+                            ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                            : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                        )}
+                      >
+                        <ExternalLink size={11} className="text-indigo-500" />
+                        <span>AI Studio API Keys & Tier</span>
+                      </a>
+                      <a
+                        href="https://aistudio.google.com/usage"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-lg border text-[10px] font-medium inline-flex items-center gap-1 transition-colors",
+                          isEditorial
+                            ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                            : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                        )}
+                      >
+                        <ExternalLink size={11} className="text-emerald-500" />
+                        <span>AI Studio Quota & Usage</span>
+                      </a>
+                      <a
+                        href="https://console.cloud.google.com/billing"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-lg border text-[10px] font-medium inline-flex items-center gap-1 transition-colors",
+                          isEditorial
+                            ? "bg-white hover:bg-[#f4f4f5] border-[#e4e4e7] text-[#18181b]"
+                            : "bg-[#121215] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
+                        )}
+                      >
+                        <ExternalLink size={11} className="text-amber-500" />
+                        <span>Google Cloud Billing & Budgets</span>
+                      </a>
+                    </div>
+                  </div>
+
                   {/* Google Search Grounding */}
-                  <div className={cn("flex justify-between items-center pt-2.5 border-t", isEditorial ? "border-[#e6e1d6]" : "border-white/10")}>
+                  <div className={cn("flex justify-between items-center pt-2.5 border-t", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
                     <div>
-                      <label className="text-xs font-medium block">Tra cứu Google Search thời gian thực</label>
-                      <p className="text-[10px] opacity-60">Đính kèm nguồn trích dẫn xác thực vào câu trả lời</p>
+                      <label className="text-xs font-medium block">Real-Time Google Search Grounding</label>
+                      <p className="text-[10px] opacity-60">Ground responses with live verified web citations</p>
                     </div>
                     <button 
                       onClick={() => setSettings({...settings, useGoogleSearch: !settings.useGoogleSearch})}
                       className={cn(
                         "w-9 h-5 rounded-full transition-colors relative shrink-0",
                         settings.useGoogleSearch 
-                          ? isEditorial ? "bg-amber-800" : "bg-blue-600" 
-                          : isEditorial ? "bg-[#d8d1c4]" : "bg-[#232733]"
+                          ? "bg-indigo-600" 
+                          : isEditorial ? "bg-[#d4d4d8]" : "bg-[#27272a]"
                       )}
                     >
                       <motion.div 
                         animate={{ x: settings.useGoogleSearch ? 18 : 2 }}
-                        className="absolute top-1 w-3 h-3 bg-white rounded-full shadow-xs"
+                        className="absolute top-1 w-3 h-3 rounded-full shadow-xs bg-white"
                       />
                     </button>
                   </div>
 
                   {/* Unlimited History */}
-                  <div className={cn("space-y-2 pt-2.5 border-t", isEditorial ? "border-[#e6e1d6]" : "border-white/10")}>
+                  <div className={cn("space-y-2 pt-2.5 border-t", isEditorial ? "border-[#e4e4e7]" : "border-[#27272a]")}>
                     <div className="flex justify-between items-center">
                       <div>
-                        <label className="text-xs font-medium block">Không giới hạn ngữ cảnh (Unlimited History)</label>
-                        <p className="text-[10px] opacity-60">Truyền toàn bộ lịch sử trò chuyện cho AI</p>
+                        <label className="text-xs font-medium block">Unlimited Conversation History</label>
+                        <p className="text-[10px] opacity-60">Pass full conversation history to model</p>
                       </div>
                       <button 
                         onClick={() => setSettings(prev => ({ ...prev, unlimitedContext: prev.unlimitedContext === false ? true : false }))}
                         className={cn(
                           "w-9 h-5 rounded-full transition-colors relative shrink-0",
                           settings.unlimitedContext !== false 
-                            ? isEditorial ? "bg-amber-800" : "bg-blue-600" 
-                            : isEditorial ? "bg-[#d8d1c4]" : "bg-[#232733]"
+                            ? "bg-indigo-600" 
+                            : isEditorial ? "bg-[#d4d4d8]" : "bg-[#27272a]"
                         )}
                       >
                         <motion.div 
                           animate={{ x: settings.unlimitedContext !== false ? 18 : 2 }}
-                          className="absolute top-1 w-3 h-3 bg-white rounded-full shadow-xs"
+                          className="absolute top-1 w-3 h-3 rounded-full shadow-xs bg-white"
                         />
                       </button>
                     </div>
@@ -5020,8 +6603,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                     {settings.unlimitedContext === false && (
                       <div className="pt-1 space-y-1">
                         <div className="flex justify-between items-center">
-                          <label className="text-xs opacity-80">Giới hạn tin nhắn gửi kèm</label>
-                          <span className={cn("text-xs font-mono tabular-nums font-semibold", isEditorial ? "text-amber-800" : "text-blue-400")}>
+                          <label className="text-xs opacity-80">Included message history limit</label>
+                          <span className="text-xs font-mono tabular-nums font-semibold">
                             {settings.maxHistoryTokens} msgs
                           </span>
                         </div>
@@ -5033,48 +6616,26 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           value={settings.maxHistoryTokens}
                           onChange={(e) => setSettings({...settings, maxHistoryTokens: parseInt(e.target.value)})}
                           className={cn(
-                            "w-full h-1.5 rounded-lg accent-amber-700",
-                            isEditorial ? "bg-[#e2dcd0]" : "bg-[#161922]"
+                            "w-full h-1.5 rounded-lg accent-indigo-600",
+                            isEditorial ? "bg-[#e4e4e7]" : "bg-[#27272a]"
                           )}
                         />
                       </div>
                     )}
                   </div>
-
-                  {/* Temperature Slider */}
-                  <div className={cn("space-y-1 pt-2.5 border-t", isEditorial ? "border-[#e6e1d6]" : "border-white/10")}>
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-medium opacity-80">Độ sáng tạo (Temperature)</label>
-                      <span className={cn("text-xs font-mono tabular-nums font-semibold", isEditorial ? "text-amber-800" : "text-blue-400")}>
-                        {settings.temperature}
-                      </span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="2" 
-                      step="0.1"
-                      value={settings.temperature}
-                      onChange={(e) => setSettings({...settings, temperature: parseFloat(e.target.value)})}
-                      className={cn(
-                        "w-full h-1.5 rounded-lg accent-amber-700",
-                        isEditorial ? "bg-[#e2dcd0]" : "bg-[#161922]"
-                      )}
-                    />
-                  </div>
                 </div>
 
                 {/* 4. System Instruction & Core Tenets */}
                 <div className="space-y-1">
-                  <label className="text-xs font-medium opacity-80">Chỉ dẫn hệ thống (System Instruction)</label>
+                  <label className="text-xs font-medium opacity-80">System Instruction</label>
                   <textarea 
                     value={settings.systemInstruction}
                     onChange={(e) => setSettings({...settings, systemInstruction: e.target.value})}
                     className={cn(
                       "w-full border rounded-lg p-2.5 text-xs focus:outline-none h-20 resize-none",
                       isEditorial 
-                        ? "bg-white border-[#ded7ca] text-[#1e1d1b] focus:border-amber-600" 
-                        : "bg-[#07090e] border-white/[0.08] text-white focus:border-blue-500"
+                        ? "bg-[#fafafa] border-[#e4e4e7] text-[#18181b] focus:border-[#71717a]" 
+                        : "bg-[#18181b] border-[#27272a] text-[#f4f4f5] focus:border-[#52525b]"
                     )}
                   />
                 </div>
@@ -5082,24 +6643,26 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 {/* Core Tenets (for Steadfast Mode) */}
                 <div className={cn(
                   "space-y-2.5 p-3 rounded-xl border",
-                  isEditorial ? "bg-white border-[#ded7ca]" : "bg-[#07090e] border-white/[0.08]"
+                  isEditorial ? "bg-[#fafafa] border-[#e4e4e7]" : "bg-[#18181b] border-[#27272a]"
                 )}>
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-medium flex items-center gap-1.5">
-                      <Shield size={13} className={isEditorial ? "text-amber-800" : "text-amber-400"} />
-                      <span>Nguyên tắc Tư duy Kiên định (Steadfast Tenets)</span>
+                      <Shield size={13} className="text-amber-500 shrink-0" />
+                      <span>Steadfast Epistemic Tenets</span>
                     </span>
                     <button 
                       onClick={() => setSettings(prev => ({ ...prev, showReasoningSteps: !prev.showReasoningSteps }))}
                       className={cn(
                         "w-8 h-4 rounded-full transition-colors relative shrink-0",
-                        settings.showReasoningSteps ? "bg-amber-600" : isEditorial ? "bg-[#d8d1c4]" : "bg-[#232733]"
+                        settings.showReasoningSteps
+                          ? "bg-amber-500"
+                          : isEditorial ? "bg-[#d4d4d8]" : "bg-[#27272a]"
                       )}
-                      title="Bật/tắt phân rã lập luận từng bước"
+                      title="Toggle step-by-step reasoning breakdown"
                     >
                       <motion.div 
                         animate={{ x: settings.showReasoningSteps ? 16 : 2 }}
-                        className="absolute top-0.5 w-3 h-3 bg-white rounded-full shadow-xs"
+                        className="absolute top-0.5 w-3 h-3 rounded-full shadow-xs bg-white"
                       />
                     </button>
                   </div>
@@ -5111,23 +6674,23 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                       className={cn(
                         "w-full border rounded-lg p-2 text-[11px] focus:outline-none h-16 resize-none",
                         isEditorial 
-                          ? "bg-[#faf7f0] border-[#ded7ca] text-[#1e1d1b] focus:border-amber-600" 
-                          : "bg-[#0b0e15] border-white/[0.08] text-slate-200 focus:border-amber-500/50"
+                          ? "bg-white border-[#e4e4e7] text-[#18181b] focus:border-[#71717a]" 
+                          : "bg-[#121215] border-[#27272a] text-[#e4e4e7] focus:border-[#52525b]"
                       )}
                     />
                     <div className="flex flex-wrap gap-1">
                       {[
                         {
-                          label: "Khoa học & Sự thật",
-                          tenets: "- Luôn kiểm chứng tính xác thực và logic trước khi khẳng định.\n- Không a dua hoặc nhượng bộ trước các tiền đề phi logic hoặc ngụy biện.\n- Tôn trọng người dùng nhưng kiên định bảo vệ sự thật khách quan."
+                          label: "Science & Empirical Truth",
+                          tenets: "- Strictly verify empirical facts and formal logic before affirming.\n- Never flatter biased premises or concede to fallacies.\n- Respect user intent while steadfastly preserving objective truth."
                         },
                         {
-                          label: "Đa chiều & Phản biện",
-                          tenets: "- Luôn phân tích 2 mặt (ưu/nhược, rủi ro/cơ hội) trước khi kết luận.\n- Chỉ ra các ngụy biện logic (logical fallacies) nếu phát hiện.\n- Giữ lập trường công tâm, trung thực tri thức."
+                          label: "Dialectical & Critical",
+                          tenets: "- Analyze trade-offs, latent risks, and failure modes before concluding.\n- Expose formal and informal logical fallacies.\n- Maintain intellectual honesty and objective neutrality."
                         },
                         {
-                          label: "Chiến lược & Thực tiễn",
-                          tenets: "- Đánh giá tính khả thi và chi phí cơ hội thực tế.\n- Không đưa ra giải pháp hời hợt hoặc hứa hẹn phi thực tế.\n- Cảnh báo rủi ro tiềm ẩn trong các quyết định."
+                          label: "Strategic & Pragmatic",
+                          tenets: "- Evaluate real-world feasibility, unit economics, and opportunity costs.\n- Provide production-grade solutions over vague advice.\n- Explicitly highlight operational risks in decision pathways."
                         }
                       ].map((preset, idx) => (
                         <button
@@ -5137,8 +6700,8 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                           className={cn(
                             "text-[10px] px-2 py-0.5 rounded-md border transition-colors",
                             isEditorial 
-                              ? "bg-amber-50/70 border-amber-200 text-amber-900 hover:bg-amber-100" 
-                              : "bg-white/[0.05] border-white/[0.07] text-slate-300 hover:bg-white/[0.1]"
+                              ? "bg-white border-[#e4e4e7] text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
+                              : "bg-[#121215] border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
                           )}
                         >
                           {preset.label}
@@ -5152,13 +6715,13 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
               <button 
                 onClick={() => setIsSettingsOpen(false)}
                 className={cn(
-                  "w-full mt-5 font-medium py-2 rounded-xl transition-all text-xs shadow-xs text-white",
+                  "w-full mt-5 font-medium py-2 rounded-xl transition-all text-xs",
                   isEditorial
-                    ? "bg-[#2b2723] hover:bg-[#3d3731]"
-                    : "bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500"
+                    ? "bg-[#18181b] text-white hover:bg-[#27272a]"
+                    : "bg-[#f4f4f5] text-[#09090b] hover:bg-white"
                 )}
               >
-                Lưu & Đóng
+                Save & Close
               </button>
             </motion.div>
           </div>
@@ -5189,7 +6752,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                 "flex items-center justify-between pb-3 mb-3 border-b",
                 isEditorial ? "border-[#ded7ca]" : "border-white/[0.07]"
               )}>
-                <h3 className="text-sm font-display font-semibold">Kết quả tìm kiếm ({searchResults.length})</h3>
+                <h3 className="text-sm font-display font-semibold">Search Results ({searchResults.length})</h3>
                 <button onClick={() => setSearchResults([])} className="p-1 rounded-lg opacity-60 hover:opacity-100 transition-colors">
                   <X size={16} />
                 </button>
@@ -5205,7 +6768,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                   >
                     <div className="flex justify-between items-center">
                       <span className={cn("text-[11px] font-medium font-semibold", isEditorial ? "text-amber-800" : "text-blue-400")}>
-                        {r.role === 'user' ? 'Bạn' : 'AI'}
+                        {r.role === 'user' ? 'You' : 'AI'}
                       </span>
                       <span className="text-[10px] font-mono opacity-60">{r.session_name}</span>
                     </div>
@@ -5272,7 +6835,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
                       : "bg-white/[0.07] border-white/10 text-white hover:bg-white/[0.12]"
                   )}
                 >
-                  Đóng
+                  Close
                 </button>
               </div>
             </motion.div>
@@ -5280,13 +6843,7 @@ Nội dung câu lệnh cần tối ưu: "${input}"`;
         )}
       </AnimatePresence>
 
-      {/* Interactive UI Design & Theme Gallery Modal */}
-      <ThemeGalleryModal
-        isOpen={isThemeGalleryOpen}
-        onClose={() => setIsThemeGalleryOpen(false)}
-        currentTheme={theme}
-        onSelectTheme={(newTheme) => setTheme(newTheme)}
-      />
+
 
       {/* Dedicated AI Identity & Persona Hub Modal */}
       <AIIdentityModal

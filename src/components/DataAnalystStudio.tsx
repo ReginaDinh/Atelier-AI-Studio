@@ -35,7 +35,7 @@ interface ParsedDataset {
 const PRESET_DATASETS: Record<string, { name: string; description: string; data: Record<string, any>[] }> = {
   ai_benchmarks: {
     name: 'AI Models Benchmark 2026',
-    description: 'So sánh hiệu năng suy luận, tốc độ (tokens/s), chi phí và điểm chống ảo giác của các mô hình LLM',
+    description: 'Compare inference speed, cost, throughput (tok/s), and hallucination benchmarks across LLMs',
     data: [
       { Model: 'Gemini 3.8 Flash', Reasoning_Score: 91.4, Coding_HumanEval: 92.8, Speed_TokSec: 185, Truthfulness_Pct: 94.2, Cost_Per_1M: 0.35 },
       { Model: 'Gemini 4 Argon', Reasoning_Score: 96.8, Coding_HumanEval: 96.5, Speed_TokSec: 94, Truthfulness_Pct: 97.6, Cost_Per_1M: 2.50 },
@@ -48,7 +48,7 @@ const PRESET_DATASETS: Record<string, { name: string; description: string; data:
   },
   saas_metrics: {
     name: 'SaaS Revenue & Retention (Q1-Q4)',
-    description: 'Dữ liệu tăng trưởng ARR, tỷ lệ giữ chân khách hàng (NRR), CAC và biên lợi nhuận theo tháng',
+    description: 'Monthly ARR growth, net revenue retention (NRR), CAC, and gross margin metrics',
     data: [
       { Month: 'Jan', ARR_kUSD: 420, New_Users: 1250, Churn_Pct: 3.2, NRR_Pct: 112, Latency_ms: 145 },
       { Month: 'Feb', ARR_kUSD: 465, New_Users: 1420, Churn_Pct: 2.9, NRR_Pct: 115, Latency_ms: 138 },
@@ -62,7 +62,7 @@ const PRESET_DATASETS: Record<string, { name: string; description: string; data:
   },
   rag_eval: {
     name: 'RAG Architecture Evaluation',
-    description: 'Đánh giá độ chính xác truy xuất (Precision), độ phủ (Recall) và độ trễ của các chiến lược RAG',
+    description: 'Evaluation of retrieval precision, recall, and end-to-end latency across RAG architectures',
     data: [
       { Strategy: 'Naive Vector Search', Precision_Pct: 68.5, Recall_Pct: 71.2, Faithfulness: 74.0, Latency_ms: 180 },
       { Strategy: 'Hybrid BM25 + Vector', Precision_Pct: 79.4, Recall_Pct: 83.6, Faithfulness: 82.5, Latency_ms: 240 },
@@ -188,18 +188,18 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
           if (Array.isArray(arr) && arr.length > 0) {
             applyNewDataset(file.name, arr);
           } else {
-            setErrorMsg('File JSON không chứa mảng dữ liệu hợp lệ.');
+            setErrorMsg('JSON file does not contain a valid data array.');
           }
         } else {
           const rows = parseCSV(content);
           if (rows.length > 0) {
             applyNewDataset(file.name, rows);
           } else {
-            setErrorMsg('Không thể phân tích cú pháp file CSV.');
+            setErrorMsg('Unable to parse CSV file.');
           }
         }
       } catch (err) {
-        setErrorMsg('Lỗi đọc file: Hãy đảm bảo định dạng CSV hoặc JSON hợp lệ.');
+        setErrorMsg('File error: Please ensure a valid CSV or JSON format.');
       }
     };
     reader.readAsText(file);
@@ -226,10 +226,10 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
         setRawInputModalOpen(false);
         setRawText('');
       } else {
-        setErrorMsg('Dữ liệu văn bản không đúng chuẩn CSV hoặc JSON.');
+        setErrorMsg('Invalid CSV or JSON format in text input.');
       }
     } catch (_) {
-      setErrorMsg('Không thể parse dữ liệu. Vui lòng kiểm tra cú pháp CSV/JSON.');
+      setErrorMsg('Parsing failed. Please verify CSV/JSON syntax.');
     }
   };
 
@@ -324,14 +324,14 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
   return (
     <div className="flex-1 flex flex-col bg-[#090a0c] text-[#e3e3e3] overflow-y-auto">
       {/* Top Header */}
-      <div className="px-6 py-4 border-b border-[#1b1c21] bg-[#0c0e12] flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+      <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-[#1b1c21] bg-[#0c0e12] flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
             <FileSpreadsheet size={18} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-white tracking-tight">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                 Data Analyst & Dynamic Chart Sandbox
               </h2>
               <span className="text-xs text-[#565a67]">·</span>
@@ -339,21 +339,21 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                 {dataset.rows.length} rows × {dataset.columns.length} cols
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Phân tích định lượng CSV/JSON, thống kê mô tả tự động & trực quan hóa biểu đồ tương tác
+            <p className="text-xs text-slate-400 line-clamp-1">
+              Quantitative CSV/JSON analysis, automated descriptive stats & interactive charts
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 bg-[#111319] border border-[#1e222d] p-1 rounded-lg">
+          <div className="flex items-center gap-1 bg-[#111319] border border-[#1e222d] p-1 rounded-lg overflow-x-auto no-scrollbar max-w-full">
             {Object.entries(PRESET_DATASETS).map(([key, item]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => applyNewDataset(item.name, item.data)}
                 className={cn(
-                  'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                  'px-2.5 py-1 text-xs font-medium rounded-md transition-colors shrink-0',
                   dataset.name === item.name
                     ? 'bg-emerald-600 text-white'
                     : 'text-slate-400 hover:text-white'
@@ -417,7 +417,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
       </div>
 
       {errorMsg && (
-        <div className="mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center justify-between">
+        <div className="mx-3 sm:mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle size={14} className="text-red-400" />
             <span>{errorMsg}</span>
@@ -429,7 +429,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
       )}
 
       {/* Main Content Grid */}
-      <div className="p-6 space-y-6 max-w-7xl mx-auto w-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto w-full">
         {/* KPI Statistical Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {columnStats.slice(0, 5).map((stat) => (
@@ -767,7 +767,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
 
             <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-[#181b22]">
               <span>
-                Đang hiển thị: <strong className="text-white">{dataset.name}</strong> ({xAxisCol} vs.{' '}
+                Displaying: <strong className="text-white">{dataset.name}</strong> ({xAxisCol} vs.{' '}
                 {yAxisCol})
               </span>
               {onSendToChat && (
@@ -778,13 +778,13 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                       .map((s) => `- ${s.col}: Avg=${s.mean}, Min=${s.min}, Max=${s.max}`)
                       .join('\n');
                     onSendToChat(
-                      `Hãy phân tích chuyên sâu bộ dữ liệu "${dataset.name}" (${dataset.rows.length} dòng) với các chỉ số thống kê:\n${statsText}\n\nVà vẽ sơ đồ tư duy Mermaid đề xuất chiến lược tối ưu dựa trên dữ liệu này.`
+                      `Perform deep statistical analysis on "${dataset.name}" (${dataset.rows.length} rows) with summary metrics:\n${statsText}\n\nGenerate actionable insights and a Mermaid diagram showing optimal next steps.`
                     );
                   }}
                   className="text-sky-400 hover:text-sky-300 font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <MessageSquarePlus size={13} />
-                  <span>Đưa dữ liệu này vào cuộc trò chuyện Chat</span>
+                  <span>Send dataset to Chat conversation</span>
                 </button>
               )}
             </div>
@@ -806,7 +806,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
               {!aiInsights && !isAnalyzingAI && (
                 <div className="py-10 text-center space-y-3">
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Nhấn <strong>AI Deep Data Insight</strong> để tự động phát hiện quy luật tương quan, điểm dị biệt (outliers) và khuyến nghị chiến lược từ bộ dữ liệu.
+                    Click <strong>AI Deep Data Insight</strong> to detect correlations, outliers, and strategic recommendations.
                   </p>
                   <button
                     type="button"
@@ -814,7 +814,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                     className="px-4 py-2 rounded-lg bg-emerald-600/15 border border-emerald-500/30 hover:bg-emerald-600/25 text-emerald-300 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                   >
                     <Sparkles size={13} />
-                    <span>Chạy phân tích AI ngay</span>
+                    <span>Run AI Analysis</span>
                   </button>
                 </div>
               )}
@@ -822,7 +822,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
               {isAnalyzingAI && (
                 <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
                   <Loader2 size={20} className="animate-spin text-emerald-400" />
-                  <span className="text-xs">Đang kiểm định thống kê & tìm điểm dị biệt...</span>
+                  <span className="text-xs">Running statistical tests & anomaly detection...</span>
                 </div>
               )}
 
@@ -835,7 +835,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                   {aiInsights.keyTrends.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-400">
-                        Xu hướng định lượng chính
+                        Key Quantitative Trends
                       </div>
                       <ul className="space-y-1 text-slate-300">
                         {aiInsights.keyTrends.map((t, i) => (
@@ -851,7 +851,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                   {aiInsights.anomalies.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">
-                        Điểm dị biệt & Lưu ý (Anomalies)
+                        Anomalies & Outliers
                       </div>
                       <ul className="space-y-1 text-slate-300">
                         {aiInsights.anomalies.map((a, i) => (
@@ -867,7 +867,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                   {aiInsights.recommendations.length > 0 && (
                     <div className="space-y-1.5 pt-1 border-t border-[#181b22]">
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
-                        Khuyến nghị hành động
+                        Strategic Recommendations
                       </div>
                       <ul className="space-y-1 text-slate-200">
                         {aiInsights.recommendations.map((r, i) => (
@@ -890,7 +890,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
           <div className="px-5 py-3 border-b border-[#181b22] flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-semibold text-white">
               <Table size={14} className="text-blue-400" />
-              <span>Bảng dữ liệu chi tiết ({dataset.name})</span>
+              <span>Raw Data Table ({dataset.name})</span>
             </div>
             <span className="text-[11px] text-slate-500 font-mono tabular-nums">
               Showing {Math.min(dataset.rows.length, 50)} of {dataset.rows.length} rows
@@ -938,7 +938,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-[#12151e] border border-[#242938] rounded-2xl w-full max-w-xl p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Dán dữ liệu CSV hoặc JSON</h3>
+              <h3 className="text-sm font-bold text-white">Paste CSV or JSON Data</h3>
               <button
                 onClick={() => setRawInputModalOpen(false)}
                 className="p-1 text-slate-400 hover:text-white"
@@ -949,7 +949,7 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
             <textarea
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
-              placeholder={`Ví dụ CSV:\nProduct,Revenue,Growth\nCloud AI,450,28.5\nEdge SDK,290,19.2`}
+              placeholder={`CSV Example:\nProduct,Revenue,Growth\nCloud AI,450,28.5\nEdge SDK,290,19.2`}
               className="w-full h-48 bg-[#090b10] border border-[#1f2433] rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500"
             />
             <div className="flex justify-end gap-2">
@@ -958,15 +958,13 @@ export const DataAnalystStudio: React.FC<DataAnalystStudioProps> = ({ onSendToCh
                 onClick={() => setRawInputModalOpen(false)}
                 className="px-4 py-2 rounded-lg bg-[#1a1e29] text-xs text-slate-300 hover:text-white"
               >
-                Hủy
-              </button>
+                Cancel</button>
               <button
                 type="button"
                 onClick={handleParseRawText}
                 className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white"
               >
-                Phân tích & Vẽ biểu đồ
-              </button>
+                Analyze & Plot</button>
             </div>
           </div>
         </div>

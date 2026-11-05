@@ -24,22 +24,22 @@ export interface FolderPreset {
 }
 
 export const PRESET_FOLDERS: FolderPreset[] = [
-  { name: 'Công việc & Dự án', emoji: '💼', color: 'indigo', description: 'Kế hoạch công tác, dự án sprint, báo cáo tiến độ' },
-  { name: 'Lập trình & Kỹ thuật', emoji: '💻', color: 'sky', description: 'Kiến trúc phần mềm, thuật toán, debug, review code' },
-  { name: 'Nghiên cứu & Học thuật', emoji: '🔬', color: 'emerald', description: 'Deep Research, tổng hợp tài liệu, bài giảng' },
-  { name: 'Ý tưởng & Đổi mới', emoji: '💡', color: 'amber', description: 'Brainstorming, sáng kiến sản phẩm, chiến lược' },
-  { name: 'Phân tích & Dữ liệu', emoji: '📊', color: 'violet', description: 'Thống kê, biểu đồ tài chính, phân tích thị trường' },
-  { name: 'Cá nhân & Thường nhật', emoji: '⚡', color: 'rose', description: 'Ghi chép hàng ngày, thói quen, giải trí cá nhân' },
+  { name: 'Work & Projects', emoji: '💼', color: 'indigo', description: 'Sprint tasks, milestones, progress updates' },
+  { name: 'Engineering & Code', emoji: '💻', color: 'sky', description: 'Architecture, algorithms, debugging, reviews' },
+  { name: 'Research & Papers', emoji: '🔬', color: 'emerald', description: 'Deep research, literature review, citations' },
+  { name: 'Ideas & Strategy', emoji: '💡', color: 'amber', description: 'Brainstorming, product roadmap, strategy' },
+  { name: 'Data & Analytics', emoji: '📊', color: 'violet', description: 'Metrics, financial models, market research' },
+  { name: 'Personal & Notes', emoji: '⚡', color: 'rose', description: 'Daily reflections, habits, reading list' },
 ];
 
 export const FOLDER_COLORS = [
-  { id: 'amber', name: 'Hổ phách (Amber)', bg: 'bg-amber-500/15', border: 'border-amber-400/40', text: 'text-amber-500', dot: 'bg-amber-500' },
-  { id: 'indigo', name: 'Chàm (Indigo)', bg: 'bg-indigo-500/15', border: 'border-indigo-400/40', text: 'text-indigo-400', dot: 'bg-indigo-500' },
-  { id: 'emerald', name: 'Ngọc bích (Emerald)', bg: 'bg-emerald-500/15', border: 'border-emerald-400/40', text: 'text-emerald-400', dot: 'bg-emerald-500' },
-  { id: 'sky', name: 'Lam trời (Sky)', bg: 'bg-sky-500/15', border: 'border-sky-400/40', text: 'text-sky-400', dot: 'bg-sky-500' },
-  { id: 'violet', name: 'Tím (Violet)', bg: 'bg-violet-500/15', border: 'border-violet-400/40', text: 'text-violet-400', dot: 'bg-violet-500' },
-  { id: 'rose', name: 'Hoa hồng (Rose)', bg: 'bg-rose-500/15', border: 'border-rose-400/40', text: 'text-rose-400', dot: 'bg-rose-500' },
-  { id: 'slate', name: 'Ghi xám (Slate)', bg: 'bg-slate-500/15', border: 'border-slate-400/40', text: 'text-slate-400', dot: 'bg-slate-500' },
+  { id: 'amber', name: 'Amber', bg: 'bg-amber-500/15', border: 'border-amber-400/40', text: 'text-amber-500', dot: 'bg-amber-500' },
+  { id: 'indigo', name: 'Indigo', bg: 'bg-indigo-500/15', border: 'border-indigo-400/40', text: 'text-indigo-400', dot: 'bg-indigo-500' },
+  { id: 'emerald', name: 'Emerald', bg: 'bg-emerald-500/15', border: 'border-emerald-400/40', text: 'text-emerald-400', dot: 'bg-emerald-500' },
+  { id: 'sky', name: 'Sky', bg: 'bg-sky-500/15', border: 'border-sky-400/40', text: 'text-sky-400', dot: 'bg-sky-500' },
+  { id: 'violet', name: 'Violet', bg: 'bg-violet-500/15', border: 'border-violet-400/40', text: 'text-violet-400', dot: 'bg-violet-500' },
+  { id: 'rose', name: 'Rose', bg: 'bg-rose-500/15', border: 'border-rose-400/40', text: 'text-rose-400', dot: 'bg-rose-500' },
+  { id: 'slate', name: 'Slate', bg: 'bg-slate-500/15', border: 'border-slate-400/40', text: 'text-slate-400', dot: 'bg-slate-500' },
 ];
 
 export const POPULAR_EMOJIS = ['📁', '💼', '💻', '🔬', '💡', '📊', '⚡', '🎯', '🚀', '📚', '🧠', '🎨', '🔥', '🛡️', '⚙️', '🌐'];
@@ -189,19 +189,19 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
               </div>
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold tracking-tight truncate flex items-center gap-2">
-                  <span>Phân loại Thư mục (Category Folders)</span>
+                  <span>Category Folders</span>
                   <span className={cn(
                     "text-[10px] font-mono px-1.5 py-0.5 rounded border font-medium",
                     isEditorial ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-sky-950 border-sky-800 text-sky-300"
                   )}>
-                    {folders.length} thư mục
+                    {folders.length} folders
                   </span>
                 </h3>
                 <p className={cn(
                   "text-[11px] truncate mt-0.5",
                   isEditorial ? "text-[#7a7469]" : "text-slate-400"
                 )}>
-                  Gom nhóm và sắp xếp cuộc trò chuyện theo chủ đề, dự án & lĩnh vực
+                  Organize conversations by topic, initiative, or discipline
                 </p>
               </div>
             </div>
@@ -219,7 +219,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                   )}
                 >
                   <Plus size={13} />
-                  <span>Thêm thư mục</span>
+                  <span>New Folder</span>
                 </button>
               )}
               <button
@@ -261,7 +261,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 )}
               >
                 <Layers size={13} />
-                <span>Danh sách thư mục ({folders.length})</span>
+                <span>Folders ({folders.length})</span>
               </button>
 
               <button
@@ -281,7 +281,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 )}
               >
                 <FolderPlus size={13} />
-                <span>{editingId ? 'Chỉnh sửa thư mục' : 'Tạo thư mục mới'}</span>
+                <span>{editingId ? 'Edit Folder' : 'New Folder'}</span>
               </button>
             </div>
 
@@ -297,10 +297,10 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                     ? "bg-amber-100/70 hover:bg-amber-100 text-amber-900 border-amber-300/80"
                     : "bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 border-sky-400/30"
                 )}
-                title="Sử dụng Gemini để tự động phân tích và xếp các đoạn chat chưa phân loại vào đúng thư mục"
+                title="Use Gemini to auto-sort uncategorized conversations into the best matching folders"
               >
                 <Sparkles size={12} className={isAutoCategorizing ? "animate-spin" : ""} />
-                <span>{isAutoCategorizing ? 'Đang phân loại...' : 'AI Tự động xếp thư mục'}</span>
+                <span>{isAutoCategorizing ? 'Sorting...' : 'AI Auto-Sort'}</span>
               </button>
             )}
           </div>
@@ -317,24 +317,24 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 )}>
                   <div className="flex items-center gap-4">
                     <div>
-                      <span className="opacity-60 block text-[10px] uppercase font-mono">Tổng cuộc trò chuyện</span>
+                      <span className="opacity-60 block text-[10px] uppercase font-mono">Total Chats</span>
                       <span className="font-semibold text-sm">{sessions.length}</span>
                     </div>
                     <div className="w-[1px] h-6 bg-current opacity-15" />
                     <div>
-                      <span className="opacity-60 block text-[10px] uppercase font-mono">Đã phân loại</span>
+                      <span className="opacity-60 block text-[10px] uppercase font-mono">Categorized</span>
                       <span className="font-semibold text-sm text-emerald-500">{sessions.length - uncategorizedCount}</span>
                     </div>
                     <div className="w-[1px] h-6 bg-current opacity-15" />
                     <div>
-                      <span className="opacity-60 block text-[10px] uppercase font-mono">Chưa phân loại</span>
+                      <span className="opacity-60 block text-[10px] uppercase font-mono">Uncategorized</span>
                       <span className="font-semibold text-sm text-amber-500">{uncategorizedCount}</span>
                     </div>
                   </div>
 
                   {folders.length === 0 && (
                     <span className="text-[11px] opacity-70 italic">
-                      Chưa có thư mục nào. Bạn có thể chọn nhanh từ các mẫu đề xuất bên dưới!
+                      No folders yet. Select a starter preset below or create your own!
                     </span>
                   )}
                 </div>
@@ -343,7 +343,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 {folders.length > 0 ? (
                   <div className="space-y-2">
                     <div className="text-[11px] font-mono uppercase tracking-wider opacity-60 px-1">
-                      Thư mục hiện có ({folders.length})
+                      Existing Folders ({folders.length})
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {folders.map(f => {
@@ -371,7 +371,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                                   isEditorial ? "text-[#706a61]" : "text-slate-400"
                                 )}>
                                   <MessageSquare size={10} />
-                                  <span>{count} hội thoại</span>
+                                  <span>{count} chats</span>
                                 </span>
                               </div>
                             </div>
@@ -384,7 +384,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                                   "w-7 h-7 rounded-lg border text-xs flex items-center justify-center transition-colors",
                                   isEditorial ? "bg-[#f5f1e8] hover:bg-[#ede5d6] border-[#ded7ca]" : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-300 hover:text-white"
                                 )}
-                                title="Chỉnh sửa thư mục"
+                                title="Edit folder"
                               >
                                 <Edit3 size={12} />
                               </button>
@@ -396,7 +396,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                                     onClick={() => handleDelete(f.id)}
                                     className="h-7 px-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
                                   >
-                                    Xóa?
+                                    Delete?
                                   </button>
                                   <button
                                     type="button"
@@ -411,7 +411,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                                   type="button"
                                   onClick={() => setDeleteConfirmId(f.id)}
                                   className="w-7 h-7 rounded-lg border border-transparent hover:border-red-400/40 text-slate-400 hover:text-red-500 flex items-center justify-center transition-colors"
-                                  title="Xóa thư mục (các đoạn chat sẽ chuyển sang Chưa phân loại)"
+                                  title="Delete folder (chats will move to Uncategorized)"
                                 >
                                   <Trash2 size={12} />
                                 </button>
@@ -425,9 +425,9 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 ) : (
                   <div className="text-center py-6 px-4 rounded-xl border border-dashed opacity-75 space-y-1">
                     <FolderIcon size={24} className="mx-auto mb-2 opacity-50" />
-                    <p className="text-xs font-semibold">Chưa có thư mục nào được tạo</p>
+                    <p className="text-xs font-semibold">No folders created yet</p>
                     <p className="text-[11px] opacity-70">
-                      Tạo thư mục riêng hoặc chọn từ các mẫu nhanh bên dưới để bắt đầu phân loại.
+                      Create your own folder or choose from starter presets below.
                     </p>
                   </div>
                 )}
@@ -436,7 +436,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 <div className="space-y-2.5 pt-2">
                   <div className="flex items-center justify-between px-1">
                     <span className="text-[11px] font-mono uppercase tracking-wider opacity-60">
-                      Mẫu thư mục đề xuất (Thêm nhanh)
+                      Suggested Starter Presets
                     </span>
                   </div>
 
@@ -484,12 +484,12 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                             {alreadyAdded ? (
                               <>
                                 <Check size={10} />
-                                <span>Đã có</span>
+                                <span>Added</span>
                               </>
                             ) : (
                               <>
                                 <Plus size={10} />
-                                <span>Thêm</span>
+                                <span>Add</span>
                               </>
                             )}
                           </button>
@@ -504,7 +504,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
               <form onSubmit={handleSave} className="space-y-4">
                 {/* Name & Emoji input */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold block">Tên thư mục</label>
+                  <label className="text-xs font-semibold block">Folder Name</label>
                   <div className="flex gap-2">
                     {/* Emoji selector display */}
                     <div className="relative">
@@ -517,13 +517,13 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                           isEditorial ? "bg-white border-[#ded7ca] focus:ring-amber-500" : "bg-[#181c27] border-white/15 focus:ring-sky-500 text-white"
                         )}
                         maxLength={2}
-                        title="Biểu tượng Emoji"
+                        title="Emoji Icon"
                       />
                     </div>
 
                     <input
                       type="text"
-                      placeholder="Ví dụ: Công việc & Dự án, Lập trình, Học tập..."
+                      placeholder="e.g. Work & Projects, Engineering, Research..."
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className={cn(
@@ -538,7 +538,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 {/* Popular Emojis bar */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 block">
-                    Chọn nhanh Emoji
+                    Popular Emojis
                   </label>
                   <div className="flex flex-wrap gap-1.5 p-2 rounded-xl border bg-black/5 dark:bg-white/5 border-current/10">
                     {POPULAR_EMOJIS.map((em, idx) => (
@@ -560,7 +560,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 {/* Color theme selection */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 block">
-                    Màu sắc nhận diện
+                    Color Accent
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {FOLDER_COLORS.map(c => {
@@ -588,7 +588,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                 {/* Quick Presets Picker in Editor */}
                 <div className="space-y-1.5 pt-1">
                   <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 block">
-                    Hoặc chọn từ mẫu có sẵn
+                    Or Choose From Preset Templates
                   </label>
                   <div className="flex flex-wrap gap-1.5">
                     {PRESET_FOLDERS.map((pr, idx) => (
@@ -621,7 +621,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                       isEditorial ? "border-[#ded7ca] text-[#6b655d]" : "border-white/10 text-slate-300 hover:text-white"
                     )}
                   >
-                    Hủy bỏ
+                    Cancel
                   </button>
 
                   <button
@@ -633,11 +633,11 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
                     )}
                   >
                     {isSaving ? (
-                      <span>Đang lưu...</span>
+                      <span>Saving...</span>
                     ) : (
                       <>
                         <Check size={14} />
-                        <span>{editingId ? 'Cập nhật thư mục' : 'Tạo thư mục'}</span>
+                        <span>{editingId ? 'Update Folder' : 'Create Folder'}</span>
                       </>
                     )}
                   </button>

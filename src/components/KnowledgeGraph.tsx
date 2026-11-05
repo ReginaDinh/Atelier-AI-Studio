@@ -537,30 +537,28 @@ export default function KnowledgeGraph({
   return (
     <div className="flex-1 flex flex-col h-full bg-[#07080a] text-slate-100 overflow-hidden relative select-none">
       {/* Header Bar */}
-      <div className="h-14 px-4 sm:px-6 border-b border-[#1b1f29] bg-[#0c0e12]/80 backdrop-blur-md flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+      <div className="min-h-14 py-2 px-3 sm:px-6 border-b border-[#1b1f29] bg-[#0c0e12]/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-2 z-10">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
             <Network size={16} />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold tracking-tight text-white">Visual Knowledge Graph</h2>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <h2 className="text-xs sm:text-sm font-semibold tracking-tight text-white truncate">Visual Knowledge Graph</h2>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
                 D3 Force Core
               </span>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-400">
               <span>{graphData?.summary.totalEntities || 0} entities</span>
               <span aria-hidden="true">·</span>
-              <span>{graphData?.summary.totalRelationships || 0} connections</span>
-              <span aria-hidden="true">·</span>
-              <span>Density: {graphData?.summary.density || 0}</span>
+              <span>{graphData?.summary.totalRelationships || 0} links</span>
             </div>
           </div>
         </div>
 
         {/* Scope and Action Buttons */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           {/* Scope Selector */}
           <div className="flex items-center p-0.5 bg-[#12151c] border border-[#212633] rounded-lg text-xs">
             <button
@@ -892,7 +890,7 @@ export default function KnowledgeGraph({
 
         {/* Node Inspector Drawer */}
         {selectedNode && (
-          <div className="absolute top-0 right-0 bottom-0 w-80 sm:w-96 bg-[#0c0e12]/95 backdrop-blur-xl border-l border-[#1b1f29] shadow-2xl z-30 flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="absolute top-0 right-0 bottom-0 w-full sm:w-96 bg-[#0c0e12]/95 backdrop-blur-xl border-l border-[#1b1f29] shadow-2xl z-30 flex flex-col animate-in slide-in-from-right duration-200">
             {/* Drawer Header */}
             <div className="p-4 border-b border-[#1b1f29] flex items-start justify-between">
               <div className="space-y-1">

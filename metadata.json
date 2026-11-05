@@ -1,6 +1,6 @@
 {
-  "name": "Gemini Pro Chatbot",
-  "description": "A full-featured AI chatbot with RAG, chat history, token optimization, and customizable parameters.",
+  "name": "Atelier AI Studio",
+  "description": "Flagship cognitive AI workspace with 3-expert council debate, deep research, interactive canvas, D3 knowledge graph, and data analytics.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

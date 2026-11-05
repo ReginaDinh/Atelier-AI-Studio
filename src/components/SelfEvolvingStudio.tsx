@@ -32,12 +32,13 @@ import {
 } from '../services/geminiService';
 import { cn } from '../lib/utils';
 import VectorIcon from './VectorIcon';
+import { DEFAULT_PERSONAS } from './PersonaManagerModal';
 
 export const DEFAULT_EVOLVED_RULES: EvolvedMetaRule[] = [
   {
     id: 'default_rule_1',
     category: 'reasoning',
-    rule: 'Phân rã mọi bài toán phức tạp theo khung MECE (Không trùng lặp - Không bỏ sót) và Nguyên lý Đầu tiên (First Principles) trước khi đưa ra giải pháp.',
+    rule: 'Deconstruct complex problems using First Principles and MECE framing before proposing solutions.',
     triggerSource: 'Core Meta-Cognitive Baseline',
     impactScore: 96,
     active: true,
@@ -47,7 +48,7 @@ export const DEFAULT_EVOLVED_RULES: EvolvedMetaRule[] = [
   {
     id: 'default_rule_2',
     category: 'accuracy',
-    rule: 'Tự kiểm tra chéo các giả định ngầm trong câu hỏi; tuyệt đối không xu nịnh (anti-sycophancy) hoặc bịa đặt nguồn trích dẫn/DOI.',
+    rule: 'Cross-check implicit assumptions; adhere strictly to anti-sycophancy with verified citations and DOIs.',
     triggerSource: 'Epistemic Calibration Guardrail',
     impactScore: 98,
     active: true,
@@ -57,7 +58,7 @@ export const DEFAULT_EVOLVED_RULES: EvolvedMetaRule[] = [
   {
     id: 'default_rule_3',
     category: 'formatting',
-    rule: 'Chủ động sử dụng bảng so sánh Markdown cho các đánh đổi đa chiều, LaTeX cho biểu thức toán học và sơ đồ Mermaid cho kiến trúc/quy trình.',
+    rule: 'Use Markdown tradeoff tables, LaTeX for math formulations, and Mermaid diagrams for architecture/workflows.',
     triggerSource: 'Structural Clarity Optimizer',
     impactScore: 93,
     active: true,
@@ -71,24 +72,38 @@ interface SelfEvolvingStudioProps {
   isMidnight: boolean;
   messages: Message[];
   settings: ChatSettings;
-  activePersona: Persona;
-  onUpdateSettings: (updater: (prev: ChatSettings) => ChatSettings) => void;
-  onUpdateMessageContent: (msgIndex: number, newContent: string, evaluation?: any) => void;
-  onSavePersona: (updatedPersona: Persona) => void;
+  personas?: Persona[];
+  activePersonaId?: string;
+  activePersona?: Persona;
+  onUpdateSettings: (updater: ((prev: ChatSettings) => ChatSettings) | Partial<ChatSettings>) => void;
+  onUpdateMessage?: (msgIdx: number, updatedMsg: Message) => void;
+  onUpdateMessageContent?: (msgIndex: number, newContent: string, evaluation?: any) => void;
+  onEvolvePersonaInstruction?: (personaId: string, appendedRule: string) => void;
+  onSavePersona?: (updatedPersona: Persona) => void;
   onClose: () => void;
 }
 
 export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
   isEditorial,
   isMidnight,
-  messages,
+  messages = [],
   settings,
+  personas,
+  activePersonaId,
   activePersona,
   onUpdateSettings,
+  onUpdateMessage,
   onUpdateMessageContent,
+  onEvolvePersonaInstruction,
   onSavePersona,
   onClose
 }) => {
+  const currentPersona: Persona =
+    activePersona ||
+    (personas && activePersonaId ? personas.find((p) => p.id === activePersonaId) : undefined) ||
+    (personas && personas.length > 0 ? personas[0] : undefined) ||
+    DEFAULT_PERSONAS[0];
+
   const evolvedRules = settings.evolvedRules || DEFAULT_EVOLVED_RULES;
   const selfImprovementEnabled = settings.selfImprovementMode !== false;
 
@@ -180,7 +195,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
       id: `manual_${Date.now()}`,
       category: newRuleCategory,
       rule: newRuleText.trim(),
-      triggerSource: 'Người dùng định nghĩa trực tiếp',
+      triggerSource: 'User Defined',
       impactScore: 95,
       active: true,
       appliedCount: 1,
@@ -191,14 +206,14 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
       evolvedRules: [newRule, ...(prev.evolvedRules || DEFAULT_EVOLVED_RULES)]
     }));
     setNewRuleText('');
-    setStatusBanner('Đã thêm Quy tắc Tự Tiến Hóa mới vào Tầng Nhận Thức Layer 6!');
+    setStatusBanner('Added new Self-Evolution Rule to Layer 6 Meta-Cognition!');
     setTimeout(() => setStatusBanner(null), 3500);
   };
 
   const handleExtractRulesFromHistory = async () => {
     if (isSynthesizingRules) return;
     if (messages.length === 0) {
-      setStatusBanner('Hãy thực hiện ít nhất 1 lượt trò chuyện để AI phân tích và đúc kết quy tắc.');
+      setStatusBanner('Have at least 1 chat turn for AI to analyze and distill rules.');
       setTimeout(() => setStatusBanner(null), 3500);
       return;
     }
@@ -211,10 +226,10 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
           evolvedRules: [...extracted, ...(prev.evolvedRules || DEFAULT_EVOLVED_RULES)]
         }));
         setStatusBanner(
-          `Đã tự động đúc kết +${extracted.length} Quy tắc Tự Tiến Hóa từ lịch sử hội thoại!`
+          `Distilled +${extracted.length} self-evolution rules from conversation history!`
         );
       } else {
-        setStatusBanner('Các quy tắc hiện tại đã bao phủ tối ưu ngữ cảnh hội thoại này.');
+        setStatusBanner('Existing rules already cover this conversation context.');
       }
     } catch (e) {
       console.error(e);
@@ -230,7 +245,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
     const prevUserMsg =
       selectedTurnIdx > 0 && messages[selectedTurnIdx - 1]?.role === 'user'
         ? messages[selectedTurnIdx - 1].content
-        : 'Phân tích và trả lời chuyên sâu';
+        : 'In-depth analysis and response';
 
     setIsRunningReflexion(true);
     setReflexionResult(null);
@@ -257,12 +272,24 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
 
   const handleApplyRefinedResponseToChat = () => {
     if (!reflexionResult || selectedTurnIdx < 0) return;
-    onUpdateMessageContent(
-      selectedTurnIdx,
-      reflexionResult.refinedResponse,
-      reflexionResult.evaluation
-    );
-    setStatusBanner('Đã cập nhật Bản phản hồi nâng cấp (V2) trực tiếp vào luồng hội thoại!');
+    if (onUpdateMessageContent) {
+      onUpdateMessageContent(
+        selectedTurnIdx,
+        reflexionResult.refinedResponse,
+        reflexionResult.evaluation
+      );
+    }
+    if (onUpdateMessage) {
+      const original = messages[selectedTurnIdx];
+      if (original) {
+        onUpdateMessage(selectedTurnIdx, {
+          ...original,
+          content: reflexionResult.refinedResponse,
+          selfEvaluation: reflexionResult.evaluation
+        });
+      }
+    }
+    setStatusBanner('Applied upgraded V2 response directly into chat stream!');
     setTimeout(() => setStatusBanner(null), 3500);
   };
 
@@ -274,25 +301,33 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
         .filter((r) => r.active)
         .map((r) => `- ${r.rule}`)
         .join('\n');
-      const combinedInstruction = `${activePersona.instruction}\n\n### Evolved Self-Improvement Directives:\n${activeRulesText}`;
+      const personaName = currentPersona.name || 'General';
+      const personaDesc = currentPersona.description || '';
+      const personaInstr = currentPersona.instruction || '';
+      const combinedInstruction = `${personaInstr}\n\n### Evolved Self-Improvement Directives:\n${activeRulesText}`;
       const optimized = await optimizePersonaWithAI({
-        name: activePersona.name,
-        description: activePersona.description,
+        name: personaName,
+        description: personaDesc,
         instruction: combinedInstruction
       });
       if (optimized) {
         const updatedPersona: Persona = {
-          ...activePersona,
+          ...currentPersona,
           instruction: optimized.instruction,
-          reasoningFramework: optimized.reasoningFramework || activePersona.reasoningFramework,
+          reasoningFramework: optimized.reasoningFramework || currentPersona.reasoningFramework,
           verificationChecklist:
-            optimized.verificationChecklist?.length > 0
+            optimized.verificationChecklist && optimized.verificationChecklist.length > 0
               ? optimized.verificationChecklist
-              : activePersona.verificationChecklist
+              : currentPersona.verificationChecklist || []
         };
-        onSavePersona(updatedPersona);
+        if (onSavePersona) {
+          onSavePersona(updatedPersona);
+        }
+        if (onEvolvePersonaInstruction) {
+          onEvolvePersonaInstruction(currentPersona.id, activeRulesText);
+        }
         setStatusBanner(
-          `Đã tự động tiến hóa System Prompt & Checklist cho chuyên gia "${activePersona.name}"!`
+          `Evolved System Prompt & Checklist for "${personaName}"!`
         );
       }
     } catch (e) {
@@ -364,7 +399,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-lg font-bold tracking-tight">
-                  Kiến trúc AI Tự Tiến Hóa (Meta-Cognitive Self-Improving AI)
+                  Meta-Cognitive Self-Improving AI Architecture
                 </h1>
                 <span
                   className={cn(
@@ -385,7 +420,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                   isEditorial ? 'text-[#6e685f]' : 'text-slate-400'
                 )}
               >
-                Vòng lặp phản xạ nhận thức khép kín (Closed-Loop Reflexion): Tự chấm điểm đa trục sau mỗi lượt trả lời, tự đúc kết quy tắc tối ưu từ chỉnh sửa của người dùng (Meta-Rule Distillation) và tự nâng cấp bản thảo V1 → V2 mà không cần huấn luyện lại trọng số.
+                Closed-Loop Reflexion: Multi-axis self-evaluation per turn, implicit feedback rule distillation, and zero-weight-update V1 → V2 response refinement.
               </p>
             </div>
           </div>
@@ -406,7 +441,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
               )}
             >
               <Activity size={14} />
-              <span>{selfImprovementEnabled ? 'Tự Tiến Hóa: BẬT' : 'Tự Tiến Hóa: TẮT'}</span>
+              <span>{selfImprovementEnabled ? 'Self-Evolution: ON' : 'Self-Evolution: OFF'}</span>
             </button>
             <button
               type="button"
@@ -418,7 +453,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                   : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
               )}
             >
-              <span>Quay lại Chat</span>
+              <span>Back to Chat</span>
             </button>
           </div>
         </div>
@@ -446,30 +481,30 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
           {[
             {
-              label: 'Độ Chính Xác Tri Thức (Epistemic Accuracy)',
+              label: 'Epistemic Accuracy',
               score: avgAccuracy,
-              desc: 'Kiểm chứng tiền đề, chống ảo giác trích dẫn & toán học',
+              desc: 'Verified premises, zero-hallucination citations and mathematical rigor',
               icon: Shield,
               color: isEditorial ? 'text-emerald-800' : 'text-emerald-400'
             },
             {
-              label: 'Độ Sâu Nguyên Lý (Analytical Depth)',
+              label: 'Analytical Depth',
               score: avgDepth,
-              desc: 'Phân rã First-Principles, mô hình định lượng & trường hợp biên',
+              desc: 'First-principles deconstruction, quantitative models, edge cases',
               icon: Layers,
               color: isEditorial ? 'text-indigo-800' : 'text-indigo-400'
             },
             {
-              label: 'Cấu Trúc Trình Bày (Structural Clarity)',
+              label: 'Structural Clarity',
               score: avgClarity,
-              desc: 'Minto Pyramid, bảng so sánh Markdown, LaTeX & sơ đồ Mermaid',
+              desc: 'Minto Pyramid, Markdown comparison tables, LaTeX & Mermaid diagrams',
               icon: Target,
               color: isEditorial ? 'text-amber-800' : 'text-amber-400'
             },
             {
-              label: 'Độ Khớp Mục Tiêu (Intent Alignment)',
+              label: 'Intent Alignment',
               score: avgAlignment,
-              desc: 'Tuân thủ quy tắc cá nhân hóa & không lặp lại ngữ cảnh thừa',
+              desc: 'Strict persona adherence, concise context, zero redundant filler',
               icon: Award,
               color: isEditorial ? 'text-sky-800' : 'text-sky-400'
             }
@@ -518,10 +553,10 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                 <div>
                   <h2 className="text-sm font-bold flex items-center gap-2">
                     <Zap size={15} className={isEditorial ? 'text-amber-700' : 'text-sky-400'} />
-                    <span>Kho Quy Tắc Tự Tiến Hóa — Layer 6 Meta-Rules ({evolvedRules.length})</span>
+                    <span>Self-Evolution Rule Repository — Layer 6 Meta-Rules ({evolvedRules.length})</span>
                   </h2>
                   <p className="text-[11px] opacity-65 mt-0.5">
-                    Các quy tắc đang BẬT sẽ tự động được tiêm vào Tầng 6 của System Prompt để điều hướng hành vi AI ở mọi lượt chat tiếp theo.
+                    Active rules are automatically injected into Layer 6 of the System Prompt to steer AI reasoning across subsequent turns.
                   </p>
                 </div>
 
@@ -542,7 +577,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                     ) : (
                       <Sparkles size={12} />
                     )}
-                    <span>AI Đúc kết từ Lịch sử Chat</span>
+                    <span>Distill Rules from Chat</span>
                   </button>
                 </div>
               </div>
@@ -559,16 +594,16 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                       : 'bg-[#0b0e16] border-white/10 text-white'
                   )}
                 >
-                  <option value="reasoning">Suy luận (Reasoning)</option>
-                  <option value="accuracy">Chính xác (Accuracy)</option>
-                  <option value="formatting">Trình bày (Formatting)</option>
-                  <option value="constraint">Ràng buộc (Constraint)</option>
+                  <option value="reasoning">Reasoning</option>
+                  <option value="accuracy">Accuracy</option>
+                  <option value="formatting">Formatting</option>
+                  <option value="constraint">Constraint</option>
                 </select>
                 <input
                   type="text"
                   value={newRuleText}
                   onChange={(e) => setNewRuleText(e.target.value)}
-                  placeholder="Thêm quy tắc tiến hóa mới (VD: Luôn kèm độ phức tạp Big-O khi viết thuật toán)..."
+                  placeholder="Add new evolution rule (e.g., Always state Big-O complexity for algorithms)..."
                   className={cn(
                     'flex-1 h-9 px-3 rounded-xl border text-xs focus:outline-none',
                     isEditorial
@@ -587,7 +622,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                   )}
                 >
                   <Plus size={13} />
-                  <span>Thêm quy tắc</span>
+                  <span>Add Rule</span>
                 </button>
               </form>
 
@@ -621,7 +656,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                             Impact: {item.impactScore}%
                           </span>
                           <span className="text-[10px] opacity-60 truncate">
-                            • Nguồn: {item.triggerSource}
+                            • Source: {item.triggerSource}
                           </span>
                         </div>
                         <p className="text-xs font-medium leading-relaxed">{item.rule}</p>
@@ -639,7 +674,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                                 : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                               : 'bg-black/5 dark:bg-white/5 border-transparent'
                           )}
-                          title={item.active ? 'Đang kích hoạt trong Layer 6' : 'Đang tạm tắt'}
+                          title={item.active ? 'Active in Layer 6' : 'Disabled'}
                         >
                           {item.active ? 'ON' : 'OFF'}
                         </button>
@@ -647,7 +682,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                           type="button"
                           onClick={() => handleDeleteRule(item.id)}
                           className="w-7 h-7 rounded-lg inline-flex items-center justify-center opacity-50 hover:opacity-100 hover:text-rose-500 transition-all"
-                          title="Xóa quy tắc"
+                          title="Delete rule"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -674,14 +709,14 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                       : 'bg-sky-500/15 border-sky-500/30 text-sky-300'
                   )}
                 >
-                  <VectorIcon name={activePersona.emoji} size={15} />
+                  <VectorIcon name={currentPersona?.emoji || 'sparkles'} size={15} />
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-semibold truncate">
-                    Tiến hóa Chuyên gia đang chọn: {activePersona.name}
+                    Evolve Selected Persona: {currentPersona?.name || 'Expert'}
                   </div>
                   <div className="text-[10px] opacity-65 truncate">
-                    Hợp nhất các Quy tắc Tự Tiến Hóa vào System Prompt gốc của Persona này
+                    Merge distilled Meta-Rules into this persona's base System Prompt
                   </div>
                 </div>
               </div>
@@ -702,7 +737,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                 ) : (
                   <RefreshCw size={12} />
                 )}
-                <span>Nâng cấp Persona "{activePersona.name}"</span>
+                <span>Upgrade Persona "{currentPersona?.name || 'Expert'}"</span>
               </button>
             </div>
           </div>
@@ -725,10 +760,10 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                     size={15}
                     className={isEditorial ? 'text-indigo-700' : 'text-indigo-400'}
                   />
-                  <span>Phòng Thí Nghiệm Reflexion (Tự Phản Biện V1 → V2)</span>
+                  <span>Reflexion Lab (Self-Critique V1 → V2)</span>
                 </h2>
                 <p className="text-[11px] opacity-65 mt-0.5">
-                  Chọn một câu trả lời của AI trong phiên chat để chạy vòng lặp Tự Phản Biện (Self-Critique), chỉ ra điểm mù và viết lại bản nâng cấp V2.
+                  Select an AI turn to trigger the self-critique loop, expose reasoning blind spots, and generate an upgraded V2 response.
                 </p>
               </div>
 
@@ -743,17 +778,17 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                 >
                   <Brain size={24} className="mx-auto opacity-50" />
                   <div className="text-xs font-medium">
-                    Chưa có câu trả lời nào trong phiên hội thoại hiện tại
+                    No AI responses yet in this conversation
                   </div>
                   <p className="text-[11px] opacity-75">
-                    Hãy gửi một câu hỏi ở tab Hội thoại, hoặc nhấn nút "Tự cải thiện (Reflexion)" ngay bên dưới bất kỳ câu trả lời nào của AI.
+                    Send a prompt in Chat or click "Reflexion (Self-Improve)" beneath any AI response.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium opacity-75 block">
-                      Chọn lượt trả lời của AI cần tự phản biện & nâng cấp:
+                      Select AI response turn to critique & upgrade:
                     </label>
                     <select
                       value={selectedTurnIdx}
@@ -770,7 +805,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                     >
                       {aiTurnIndices.map(({ m, idx }, order) => (
                         <option key={idx} value={idx}>
-                          Lượt #{order + 1}: {m.content.replace(/[#*`]/g, '').slice(0, 65)}...
+                          Turn #{order + 1}: {m.content.replace(/[#*`]/g, '').slice(0, 65)}...
                         </option>
                       ))}
                     </select>
@@ -790,12 +825,12 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                     {isRunningReflexion ? (
                       <>
                         <Loader2 size={13} className="animate-spin" />
-                        <span>Đang chạy Self-Critique & Tối ưu hóa Bản V2...</span>
+                        <span>Running Self-Critique & Synthesizing V2...</span>
                       </>
                     ) : (
                       <>
                         <Sparkles size={13} />
-                        <span>Chạy Vòng Lặp Tự Phản Biện & Nâng Cấp (V1 → V2)</span>
+                        <span>Run Self-Critique & Upgrade (V1 → V2)</span>
                       </>
                     )}
                   </button>
@@ -812,7 +847,7 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                       <div className="flex items-center justify-between border-b pb-2 border-current/10">
                         <span className="text-xs font-bold flex items-center gap-1.5">
                           <CheckCircle2 size={13} className="text-emerald-500" />
-                          <span>Kết quả Tự Phản Biện (Điểm V1: {reflexionResult.evaluation.overallScore}/100)</span>
+                          <span>Self-Critique Report (V1 Score: {reflexionResult.evaluation.overallScore}/100)</span>
                         </span>
                         <button
                           type="button"
@@ -825,14 +860,14 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
                           )}
                         >
                           <Check size={11} />
-                          <span>Áp dụng Bản V2 vào Chat</span>
+                          <span>Apply V2 to Chat</span>
                         </button>
                       </div>
 
                       {reflexionResult.evaluation.weaknesses?.length > 0 && (
                         <div className="space-y-1">
                           <div className="text-[10px] font-mono uppercase tracking-wider text-amber-600 dark:text-amber-400 font-semibold">
-                            Điểm mù phát hiện ở Bản V1:
+                            Blind Spots Identified in V1:
                           </div>
                           <ul className="text-[11px] space-y-1 list-disc pl-4 opacity-85">
                             {reflexionResult.evaluation.weaknesses.map((w: string, idx: number) => (
@@ -844,14 +879,14 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
 
                       <div className="p-2.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-[11px] space-y-0.5">
                         <div className="font-mono text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-300">
-                          Quy tắc Mới Đã Tự Động Lưu Vào Layer 6:
+                          New Distilled Rule Saved to Layer 6:
                         </div>
                         <div className="font-medium">{reflexionResult.evolvedRule.rule}</div>
                       </div>
 
                       <div className="space-y-1 pt-1">
                         <div className="text-[10px] font-mono uppercase tracking-wider opacity-60 font-semibold">
-                          Bản Phản Hồi Nâng Cấp (V2 Preview):
+                          Upgraded Response (V2 Preview):
                         </div>
                         <div
                           className={cn(
@@ -883,20 +918,20 @@ export const SelfEvolvingStudio: React.FC<SelfEvolvingStudioProps> = ({
             >
               <div className="font-bold flex items-center gap-1.5 text-xs">
                 <TrendingUp size={13} className={isEditorial ? 'text-amber-700' : 'text-sky-400'} />
-                <span>Cơ chế Vận hành Self-Improving AI (4 Tầng Tiến Hóa)</span>
+                <span>Self-Improving AI Engine (4 Evolution Layers)</span>
               </div>
               <ol className="list-decimal pl-4 space-y-1 leading-relaxed opacity-85">
                 <li>
-                  <strong>Post-Turn Evaluator:</strong> Tự chấm điểm Độ chính xác, Độ sâu, Cấu trúc & Độ khớp sau mỗi câu trả lời (0 tốn Quota).
+                  <strong>Post-Turn Evaluator:</strong> Automated multi-axis scoring of Accuracy, Depth, Structure, and Alignment with zero extra quota.
                 </li>
                 <li>
-                  <strong>Implicit Feedback Distillation:</strong> Tự phát hiện khi bạn sửa lỗi hoặc nhắc nhở trong chat để sinh quy tắc mới.
+                  <strong>Implicit Feedback Distillation:</strong> Detects user corrections and clarifications to automatically synthesize meta-rules.
                 </li>
                 <li>
-                  <strong>Layer-6 Prompt Injection:</strong> Tiêm các quy tắc tiến hóa đang bật thẳng vào System Instruction.
+                  <strong>Layer-6 Prompt Injection:</strong> Injects active evolution rules dynamically into system instructions.
                 </li>
                 <li>
-                  <strong>Reflexion V1 → V2 Loop:</strong> Tự phản biện câu trả lời cũ và tái tạo phiên bản V2 vượt trội.
+                  <strong>Reflexion V1 → V2 Loop:</strong> Evaluates past responses and generates improved V2 outputs.
                 </li>
               </ol>
             </div>

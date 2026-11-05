@@ -134,7 +134,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                   : 'text-slate-400 hover:text-white'
               )}
             >
-              3 Chuyên gia
+              All 3 Experts
             </button>
             {debate.members.map((m) => (
               <button
@@ -167,7 +167,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                 ? 'hover:bg-black/5 text-[#6e675d] hover:text-[#1e1d1b]'
                 : 'hover:bg-[#1a1f2c] text-slate-400 hover:text-white'
             )}
-            title={isExpanded ? 'Thu gọn Hội đồng' : 'Mở rộng Hội đồng'}
+            title={isExpanded ? 'Collapse Council' : 'Expand Council'}
           >
             {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -260,7 +260,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                       type="button"
                       onClick={() =>
                         onSelectFollowUp(
-                          `Hãy đào sâu thêm góc nhìn của ${member.title}: "${member.stance}"`
+                          `Please delve deeper into the perspective of ${member.title}: "${member.stance}"`
                         )
                       }
                       className={cn(
@@ -271,7 +271,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                       )}
                     >
                       <Sparkles size={10} className={style.text} />
-                      <span>Chất vấn chuyên gia này</span>
+                      <span>Interrogate this expert</span>
                     </button>
                   )}
                 </div>
@@ -296,7 +296,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                 )}
               >
                 <ArrowRightLeft size={11} className={isEditorial ? 'text-amber-700' : 'text-amber-400'} />
-                <span>Các đánh đổi cốt lõi (Core Trade-offs)</span>
+                <span>Core Trade-offs</span>
               </div>
               <div
                 className={cn(
@@ -338,7 +338,7 @@ export const CouncilDebateView: React.FC<CouncilDebateViewProps> = ({ debate, on
                 )}
               >
                 <Scale size={13} />
-                <span>Phán quyết Tổng hợp từ Chủ tọa Hội đồng (Council Synthesis)</span>
+                <span>Council Chair Synthesis & Verdict</span>
               </div>
               <span
                 className={cn(

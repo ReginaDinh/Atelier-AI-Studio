@@ -233,7 +233,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         if (isDirectPdb) {
           const pdbIdUpper = clean.toUpperCase();
           const pdbRes = await fetch(`https://files.rcsb.org/download/${pdbIdUpper}.pdb`);
-          if (!pdbRes.ok) throw new Error(`Không tìm thấy cấu trúc RCSB PDB: ${pdbIdUpper}`);
+          if (!pdbRes.ok) throw new Error(`RCSB PDB structure not found: ${pdbIdUpper}`);
           const pdbText = await pdbRes.text();
           setActivePdbId(pdbIdUpper);
           setStructureSource('pdb');
@@ -258,7 +258,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         }
 
         if (!uniJson.results || uniJson.results.length === 0) {
-          throw new Error(`Không tìm thấy dữ liệu UniProtKB cho "${clean}". Thử nhập mã gen (VD: TP53, BRCA1, EGFR).`);
+          throw new Error(`No UniProtKB data found for "${clean}". Try a gene symbol (e.g., TP53, BRCA1, EGFR).`);
         }
 
         const entry = uniJson.results[0];
@@ -274,7 +274,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
         const functionComment =
           entry.comments?.find((c: any) => c.commentType === 'FUNCTION')?.texts?.[0]?.value ||
-          'Chức năng phân tử đang được cập nhật từ UniProtKB.';
+          'Molecular function being curated from UniProtKB.';
 
         const features = (entry.features || [])
           .filter((f: any) =>
@@ -344,7 +344,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
           }
         }
       } catch (err: any) {
-        setErrorMsg(err.message || 'Lỗi khi tải dữ liệu Protein & Cấu trúc 3D.');
+        setErrorMsg(err.message || 'Failed to load Protein data & 3D Structure.');
       } finally {
         setIsLoading(false);
       }
@@ -357,7 +357,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
     setIsLoading(true);
     try {
       const res = await fetch(`https://files.rcsb.org/download/${pdbId}.pdb`);
-      if (!res.ok) throw new Error(`Không tải được PDB ${pdbId}`);
+      if (!res.ok) throw new Error(`Failed to fetch PDB ${pdbId}`);
       const text = await res.text();
       setStructureSource('pdb');
       setActivePdbId(pdbId);
@@ -425,7 +425,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             title: item.title || variationSet.variation_name || `Variant #${id}`,
             clinicalSig,
             reviewStatus,
-            conditions: conditions || 'Hội chứng di truyền lâm sàng',
+            conditions: conditions || 'Clinical genetic condition',
             chr: loc?.chr || '—',
             start: loc?.start || '—',
             consequence: item.molecular_consequence_list?.join(', ') || 'Missense / Coding variant',
@@ -435,7 +435,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
       setClinvarVariants(parsed);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Không thể truy vấn NCBI ClinVar.');
+      setErrorMsg(err.message || 'Failed to query NCBI ClinVar.');
     } finally {
       setIsLoading(false);
     }
@@ -453,11 +453,11 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
       const propRes = await fetch(propUrl);
       if (!propRes.ok) {
-        throw new Error(`Không tìm thấy hợp chất "${cleanName}" trên PubChem. Hãy thử tên thuốc/hoạt chất tiếng Anh (VD: Imatinib, Aspirin, Metformin, Gefitinib).`);
+        throw new Error(`Compound "${cleanName}" not found on PubChem. Try a drug name (e.g., Imatinib, Aspirin, Metformin, Gefitinib).`);
       }
       const propJson = await propRes.json();
       const props = propJson?.PropertyTable?.Properties?.[0];
-      if (!props) throw new Error('Dữ liệu thuộc tính PubChem trống.');
+      if (!props) throw new Error('Empty PubChem property data.');
 
       setCompoundProps({
         name: cleanName,
@@ -502,7 +502,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         console.warn('ChEMBL lookup warning:', chemblErr);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Lỗi khi tra cứu hợp chất PubChem / ChEMBL.');
+      setErrorMsg(err.message || 'Failed to query PubChem / ChEMBL compound.');
     } finally {
       setIsLoading(false);
     }
@@ -545,7 +545,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         console.warn('arXiv proxy warning:', arxivErr);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Lỗi khi truy vấn y văn Europe PMC / PubMed.');
+      setErrorMsg(err.message || 'Failed to query Europe PMC / PubMed literature.');
     } finally {
       setIsLoading(false);
     }
@@ -559,18 +559,18 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
     try {
       let contextSummary = '';
       if (activeTab === 'protein' && proteinData) {
-        contextSummary = `Protein: ${proteinData.geneSymbol} (${proteinData.accession}) - ${proteinData.proteinName}. Chức năng: ${proteinData.functionComment}`;
+        contextSummary = `Protein: ${proteinData.geneSymbol} (${proteinData.accession}) - ${proteinData.proteinName}. Function: ${proteinData.functionComment}`;
       } else if (activeTab === 'genomics') {
-        contextSummary = `Gen: ${genomicsGene}, số biến thể ClinVar Pathogenic tìm thấy: ${clinvarVariants.length}`;
+        contextSummary = `Gene: ${genomicsGene}, Pathogenic ClinVar variants: ${clinvarVariants.length}`;
       } else if (activeTab === 'chemistry' && compoundProps) {
-        contextSummary = `Hợp chất: ${compoundProps.name} (CID: ${compoundProps.CID}), Công thức: ${compoundProps.MolecularFormula}, MW: ${compoundProps.MolecularWeight} Da, ChEMBL: ${chemblInfo?.chemblId || 'N/A'}`;
+        contextSummary = `Compound: ${compoundProps.name} (CID: ${compoundProps.CID}), Formula: ${compoundProps.MolecularFormula}, MW: ${compoundProps.MolecularWeight} Da, ChEMBL: ${chemblInfo?.chemblId || 'N/A'}`;
       }
 
       const res = await fetch('/api/gemini/search-grounding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: `Tổng hợp các nghiên cứu y sinh, cơ chế phân tử, đột biến lâm sàng hoặc thử nghiệm thuốc mới nhất về: ${targetQ}`,
+          query: `Synthesize recent biomedical literature, molecular mechanisms, clinical mutations, or trials for: ${targetQ}`, foreign: true,
           context: contextSummary,
           domain: 'bioscience',
         }),
@@ -583,7 +583,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         webSearchQueries: data.webSearchQueries || [],
       });
     } catch (e: any) {
-      setErrorMsg(e.message || 'Lỗi khi gọi Google Search Grounding.');
+      setErrorMsg(e.message || 'Google Search Grounding query failed.');
     } finally {
       setGroundingLoading(false);
     }
@@ -641,15 +641,15 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
       if (activeTab === 'protein' && proteinData) {
         identifier = proteinData.accession;
         title = `${proteinData.geneSymbol} (${proteinData.accession}) — ${proteinData.proteinName}`;
-        summary = `${proteinData.functionComment}\nĐộ dài chuỗi: ${proteinData.seqLength} aa. Cấu trúc 3D: ${activePdbId}.`;
+        summary = `${proteinData.functionComment}\nSequence Length: ${proteinData.seqLength} aa. 3D Structure: ${activePdbId}.`;
         sourceUrl = `https://www.uniprot.org/uniprotkb/${proteinData.accession}`;
       } else if (activeTab === 'genomics') {
         identifier = genomicsGene;
-        title = `ClinVar Pathogenic Variants — ${genomicsGene} (${clinvarVariants.length} biến thể)`;
+        title = `ClinVar Pathogenic Variants — ${genomicsGene} (${clinvarVariants.length} variants)`;
         summary = clinvarVariants
           .slice(0, 5)
           .map(v => `${v.title}: ${v.clinicalSig} (${v.conditions})`)
-          .join(' | ') || `Dữ liệu biến thể gen ${genomicsGene}`;
+          .join(' | ') || `Variant data for gene ${genomicsGene}`;
         sourceUrl = `https://www.ncbi.nlm.nih.gov/clinvar/?term=${encodeURIComponent(genomicsGene + '[gene]')}`;
       } else if (activeTab === 'chemistry' && compoundProps) {
         identifier = `CID_${compoundProps.CID}`;
@@ -658,11 +658,11 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         sourceUrl = `https://pubchem.ncbi.nlm.nih.gov/compound/${compoundProps.CID}`;
       } else if (activeTab === 'literature') {
         identifier = searchInput.trim().replace(/\s+/g, '_').slice(0, 50);
-        title = `Tổng hợp Y văn PubMed/Europe PMC: ${searchInput.trim()}`;
+        title = `PubMed/Europe PMC Synthesis: ${searchInput.trim()}`;
         summary = papers
           .slice(0, 4)
           .map(p => `${p.title} (${p.pubYear || ''}, PMID: ${p.pmid || 'N/A'})`)
-          .join(' • ') || 'Bản ghi tài liệu y sinh';
+          .join(' • ') || 'Biomedical literature record';
         sourceUrl = `https://europepmc.org/search?query=${encodeURIComponent(searchInput.trim())}`;
       }
 
@@ -674,14 +674,14 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         category: activeTab,
         identifier,
         title,
-        summary: summary || 'Bản ghi nghiên cứu sinh học phân tử.',
+        summary: summary || 'Molecular bioscience research record.',
         sourceUrl,
       });
 
-      setCloudBanner('Đã lưu bản ghi nghiên cứu lên Cloud Firestore thành công!');
+      setCloudBanner('Saved research record to Cloud Firestore successfully!');
       setTimeout(() => setCloudBanner(null), 4000);
     } catch (err: any) {
-      setErrorMsg('Không thể lưu lên Cloud Firestore. Vui lòng kiểm tra đăng nhập Google.');
+      setErrorMsg('Unable to save to Cloud Firestore. Please check Google sign-in.');
     } finally {
       setSavingCloud(false);
     }
@@ -696,10 +696,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
     const hba = Number(props.HBondAcceptorCount || 0);
 
     const rules = [
-      { label: 'Khối lượng phân tử (MW ≤ 500 Da)', value: `${mw.toFixed(1)} Da`, pass: mw <= 500 },
-      { label: 'Độ thân dầu (XLogP ≤ 5)', value: `${logp.toFixed(2)}`, pass: logp <= 5 },
-      { label: 'Nhóm cho liên kết H (HBD ≤ 5)', value: `${hbd}`, pass: hbd <= 5 },
-      { label: 'Nhóm nhận liên kết H (HBA ≤ 10)', value: `${hba}`, pass: hba <= 10 },
+      { label: 'Molecular Weight (MW ≤ 500 Da)', value: `${mw.toFixed(1)} Da`, pass: mw <= 500 },
+      { label: 'Lipophilicity (XLogP ≤ 5)', value: `${logp.toFixed(2)}`, pass: logp <= 5 },
+      { label: 'H-Bond Donors (HBD ≤ 5)', value: `${hbd}`, pass: hbd <= 5 },
+      { label: 'H-Bond Acceptors (HBA ≤ 10)', value: `${hba}`, pass: hba <= 10 },
     ];
     const violations = rules.filter(r => !r.pass).length;
     return { rules, violations, drugLike: violations <= 1 };
@@ -710,34 +710,34 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#070a12] text-slate-100">
       {/* Top Scientific Workbench Bar */}
-      <div className="px-6 py-3.5 border-b border-white/[0.08] bg-[#0b101d]/90 backdrop-blur-md flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-inner">
-            <Dna className="w-5 h-5" />
+      <div className="px-3 sm:px-6 py-3 border-b border-white/[0.08] bg-[#0b101d]/90 backdrop-blur-md flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-inner shrink-0">
+            <Dna className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-tight text-white">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xs sm:text-sm font-bold tracking-tight text-white truncate">
                 Bioscience & Molecular Research Studio
               </h2>
-              <span className="px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+              <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
                 AlphaFold • UniProt • ClinVar • PubChem
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
-               Mô phỏng cấu trúc 3D WebGL, giải trình tự biến thể lâm sàng, sàng lọc thuốc Lipinski & Google Search Grounding
+            <p className="text-[11px] text-slate-400 line-clamp-1">
+               WebGL 3D Molecular Simulation, ClinVar Variant Mapping, Lipinski Drug Screening & Search Grounding
             </p>
           </div>
         </div>
 
         {/* Quick-Try Example Pill Bar (Science Skill Rule: never start blank) */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-slate-400 mr-1 font-medium">Mẫu thử nhanh:</span>
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar max-w-full pb-0.5">
+          <span className="text-[11px] text-slate-400 mr-1 font-medium shrink-0">Examples:</span>
           {QUICK_EXAMPLES.map(ex => (
             <button
               key={ex.label}
               onClick={() => handleSelectExample(ex)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all border ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all border shrink-0 ${
                 searchInput.toUpperCase() === ex.query.toUpperCase() && activeTab === ex.tab
                   ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/50 shadow-sm'
                   : 'bg-white/[0.04] text-slate-300 border-white/[0.08] hover:bg-white/[0.08] hover:text-white'
@@ -750,44 +750,44 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
           <button
             onClick={() => setShowCloudDrawer(!showCloudDrawer)}
-            className="ml-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/25 flex items-center gap-1.5 transition-all"
+            className="ml-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/25 flex items-center gap-1.5 transition-all shrink-0"
           >
             <Cloud className="w-3.5 h-3.5" />
-            <span>Cloud Lab ({savedRecords.length})</span>
+            <span>Cloud ({savedRecords.length})</span>
           </button>
         </div>
       </div>
 
       {/* Module Switcher + Search Bar + Live Grounding Trigger */}
-      <div className="px-6 py-3 border-b border-white/[0.06] bg-[#090d18] flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
+      <div className="px-3 sm:px-6 py-2.5 border-b border-white/[0.06] bg-[#090d18] flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07] overflow-x-auto no-scrollbar max-w-full">
           <button
             onClick={() => {
               setActiveTab('protein');
               if (!proteinData) fetchProteinWorkbench('TP53', '1TUP');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
               activeTab === 'protein'
                 ? 'bg-cyan-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
             }`}
           >
-            <Atom className="w-3.5 h-3.5" />
-            <span>1. Cấu trúc 3D & AlphaFold</span>
+            <Atom className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">1. 3D Structure</span>
           </button>
           <button
             onClick={() => {
               setActiveTab('genomics');
               if (clinvarVariants.length === 0) fetchGenomicsWorkbench(searchInput || 'TP53');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
               activeTab === 'genomics'
                 ? 'bg-cyan-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
             }`}
           >
-            <Dna className="w-3.5 h-3.5" />
-            <span>2. Hệ Gen & ClinVar</span>
+            <Dna className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">2. Genomics & ClinVar</span>
           </button>
           <button
             onClick={() => {
@@ -797,34 +797,34 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                 fetchChemistryWorkbench('Imatinib');
               }
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
               activeTab === 'chemistry'
                 ? 'bg-cyan-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
             }`}
           >
-            <FlaskConical className="w-3.5 h-3.5" />
-            <span>3. Hóa dược & PubChem</span>
+            <FlaskConical className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">3. Medicinal Chemistry</span>
           </button>
           <button
             onClick={() => {
               setActiveTab('literature');
               if (papers.length === 0) fetchLiteratureWorkbench(searchInput || 'TP53');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
               activeTab === 'literature'
                 ? 'bg-cyan-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
             }`}
           >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>4. Y văn PubMed & arXiv</span>
+            <BookOpen className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">4. PubMed Literature</span>
           </button>
         </div>
 
         {/* Search Input + Actions */}
-        <form onSubmit={handleExecuteSearch} className="flex items-center gap-2 flex-1 max-w-xl">
-          <div className="relative flex-1">
+        <form onSubmit={handleExecuteSearch} className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 flex-1 min-w-[260px] max-w-xl">
+          <div className="relative flex-1 min-w-[160px]">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -832,12 +832,12 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               onChange={e => setSearchInput(e.target.value)}
               placeholder={
                 activeTab === 'protein'
-                  ? 'Nhập mã Gen, UniProt hoặc PDB ID (VD: TP53, BRCA1, P04637, 1TUP)...'
+                  ? 'Enter Gene, UniProt or PDB ID (e.g., TP53, BRCA1, P04637, 1TUP)...'
                   : activeTab === 'genomics'
-                  ? 'Nhập ký hiệu Gen tra cứu biến thể ClinVar (VD: TP53, BRCA1, EGFR, PCSK9)...'
+                  ? 'Enter Gene symbol for ClinVar variants (e.g., TP53, BRCA1, EGFR, PCSK9)...'
                   : activeTab === 'chemistry'
-                  ? 'Nhập tên hoạt chất / thuốc (VD: Imatinib, Aspirin, Gefitinib, Olaparib)...'
-                  : 'Nhập chủ đề y sinh tra cứu PubMed / arXiv (VD: CRISPR base editing)...'
+                  ? 'Enter drug or compound name (e.g., Imatinib, Aspirin, Gefitinib, Olaparib)...'
+                  : 'Enter biomedical topic for PubMed / arXiv (e.g., CRISPR base editing)...'
               }
               className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white/[0.05] border border-white/[0.1] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
             />
@@ -848,7 +848,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-all disabled:opacity-50"
           >
             {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-            <span>Truy vấn</span>
+            <span>Search</span>
           </button>
 
           <button
@@ -856,7 +856,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             onClick={() => runGoogleSearchGrounding()}
             disabled={groundingLoading}
             className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-medium text-xs flex items-center gap-1.5 transition-all"
-            title="Sử dụng Gemini 3.8 Flash + Google Search Grounding để tổng hợp thông tin thực tế mới nhất"
+            title="Use Gemini 3.8 Flash + Google Search Grounding for real-time scientific synthesis"
           >
             {groundingLoading ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -871,14 +871,14 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             onClick={handleSaveToCloud}
             disabled={savingCloud}
             className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/30 font-medium text-xs flex items-center gap-1.5 transition-all"
-            title="Lưu kết quả phân tích này vào cơ sở dữ liệu đám mây Firestore"
+            title="Save analysis record to Cloud Firestore database"
           >
             {savingCloud ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <BookmarkCheck className="w-3.5 h-3.5" />
             )}
-            <span>Lưu Cloud</span>
+            <span>Save Cloud</span>
           </button>
         </form>
       </div>
@@ -891,7 +891,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             <span>{cloudBanner}</span>
           </div>
           <button onClick={() => setCloudBanner(null)} className="text-emerald-300 hover:text-white text-xs">
-            Đóng
+            Close
           </button>
         </div>
       )}
@@ -903,13 +903,13 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             <span>{errorMsg}</span>
           </div>
           <button onClick={() => setErrorMsg(null)} className="text-rose-300 hover:text-white text-xs">
-            Đóng
+            Close
           </button>
         </div>
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
         {/* Cloud Saved Records Drawer (when toggled) */}
         {showCloudDrawer && (
           <div className="p-4 rounded-2xl bg-[#0d1323] border border-indigo-500/30 space-y-3">
@@ -917,7 +917,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               <div className="flex items-center gap-2">
                 <Cloud className="w-4 h-4 text-indigo-400" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-200">
-                  Hồ sơ Nghiên cứu Đám mây (Firebase Firestore)
+                  Cloud Research Archive (Firebase Firestore)
                 </h3>
               </div>
               {!firebaseUser && (
@@ -925,7 +925,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   onClick={onTriggerGoogleLogin}
                   className="px-3 py-1 rounded-lg bg-indigo-500 text-white text-xs font-medium hover:bg-indigo-400"
                 >
-                  Đăng nhập Google để đồng bộ Cloud
+                  Sign in with Google to sync Cloud
                 </button>
               )}
             </div>
@@ -933,8 +933,8 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             {savedRecords.length === 0 ? (
               <p className="text-xs text-slate-400">
                 {firebaseUser
-                  ? 'Chưa có bản ghi nào được lưu. Nhấn nút "Lưu Cloud" ở thanh công cụ trên để lưu cấu trúc Protein, biến thể ClinVar hoặc hợp chất thuốc.'
-                  : 'Đăng nhập bằng tài khoản Google để lưu trữ và đồng bộ dữ liệu sinh học phân tử xuyên thiết bị với Firebase Firestore.'}
+                  ? 'No records saved yet. Click "Save Cloud" above to archive protein structures, ClinVar variants, or drug compounds.'
+                  : 'Sign in with Google to store and sync molecular bioscience data across devices with Firebase Firestore.'}
               </p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -951,7 +951,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                         <button
                           onClick={() => deleteBioscienceRecordFromFirestore(rec.id)}
                           className="text-slate-500 hover:text-rose-400 transition-colors"
-                          title="Xóa bản ghi khỏi Firestore"
+                          title="Delete record from Firestore"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -967,7 +967,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                           rel="noreferrer"
                           className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
                         >
-                          <span>Nguồn gốc</span>
+                          <span>Source</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
@@ -976,12 +976,12 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                       {onSendToChat && (
                         <button
                           onClick={() =>
-                            onSendToChat(`Phân tích chuyên sâu bản ghi sinh học đã lưu: ${rec.title}\n\n${rec.summary}`)
+                            onSendToChat(`Perform deep scientific analysis on saved record: ${rec.title}\n\n${rec.summary}`)
                           }
                           className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
                         >
                           <Send className="w-3 h-3" />
-                          <span>Đưa vào Chat</span>
+                          <span>Send to Chat</span>
                         </button>
                       )}
                     </div>
@@ -1002,20 +1002,20 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   Google Search Grounded • Gemini 3.8 Flash
                 </span>
                 <span className="text-xs text-slate-400">
-                  Đối chiếu dữ liệu thời gian thực từ Google Search
+                  Real-time Synthesis from Google Search Grounding
                 </span>
               </div>
               {onSendToChat && (
                 <button
                   onClick={() =>
                     onSendToChat(
-                      `Hãy phân tích sâu hơn kết quả Google Search Grounding sau về ${searchInput}:\n\n${groundingResult.text}`
+                      `Deeply analyze the following Google Search Grounding scientific synthesis for ${searchInput}:\n\n${groundingResult.text}`
                     )
                   }
                   className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs flex items-center gap-1.5"
                 >
                   <Send className="w-3 h-3" />
-                  <span>Thảo luận tiếp trong Chat</span>
+                  <span>Continue in Chat</span>
                 </button>
               )}
             </div>
@@ -1027,7 +1027,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             {groundingResult.sources.length > 0 && (
               <div className="pt-3 border-t border-white/[0.08]">
                 <div className="text-[11px] font-semibold text-slate-400 mb-2">
-                  Nguồn trích dẫn xác thực từ Google Search ({groundingResult.sources.length}):
+                  Verified Sources from Google Search ({groundingResult.sources.length}):
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {groundingResult.sources.map((src, idx) => (
@@ -1113,7 +1113,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                         }
                       }}
                       className="p-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-slate-300"
-                      title="Đặt lại góc nhìn 3D (Reset Camera)"
+                      title="Reset 3D Camera view"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                     </button>
@@ -1121,7 +1121,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                 </div>
 
                 {/* 3Dmol WebGL Viewport */}
-                <div className="relative w-full h-[430px] bg-[#090d16]">
+                <div className="relative w-full h-[300px] sm:h-[430px] bg-[#090d16]">
                   <div
                     ref={viewerContainerRef}
                     className="w-full h-full relative"
@@ -1130,7 +1130,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#090d16]/80 backdrop-blur-sm z-10 gap-2">
                       <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
                       <span className="text-xs text-slate-300 font-mono">
-                        Đang dựng mô hình không gian 3D phân tử...
+                        Rendering 3D molecular structure...
                       </span>
                     </div>
                   )}
@@ -1138,7 +1138,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   {/* Residue Hover Readout Pill */}
                   <div className="absolute bottom-3 left-3 z-10 pointer-events-none">
                     <div className="px-3 py-1.5 rounded-lg bg-slate-950/85 border border-white/[0.12] text-[11px] font-mono text-cyan-200 backdrop-blur-md">
-                      {hoveredResidue || 'Di chuột lên cấu trúc 3D để xem tọa độ Acid Amin & điểm tin cậy pLDDT'}
+                      {hoveredResidue || 'Hover over 3D structure to view amino acid coordinates & pLDDT score'}
                     </div>
                   </div>
                 </div>
@@ -1146,24 +1146,24 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                 {/* Canonical AlphaFold 4-Band pLDDT Confidence Legend (Required by Science Skill) */}
                 <div className="px-4 py-3 border-t border-white/[0.08] bg-[#0b101d] flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-semibold text-slate-300">
-                    Thang độ tin cậy cấu trúc AlphaFold (pLDDT):
+                    AlphaFold Confidence Metric (pLDDT):
                   </span>
                   <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-[#0053D6]" />
-                      <span className="text-slate-300">&gt;90 Rất cao</span>
+                      <span className="text-slate-300">&gt;90 Very High</span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-[#65CBF3]" />
-                      <span className="text-slate-300">70–90 Tin cậy</span>
+                      <span className="text-slate-300">70–90 Confident</span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-[#FFDB13]" />
-                      <span className="text-slate-300">50–70 Thấp</span>
+                      <span className="text-slate-300">50–70 Low</span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-[#FF7D45]" />
-                      <span className="text-slate-300">&lt;50 Rất thấp (IDR)</span>
+                      <span className="text-slate-300">&lt;50 Very Low (IDR)</span>
                     </span>
                   </div>
                 </div>
@@ -1219,7 +1219,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-cyan-400">
-                        Chức năng sinh học (Curated UniProtKB)
+                        Biological Function (Curated UniProtKB)
                       </span>
                       <span className="text-[10px] font-mono text-slate-400">[Literature curated]</span>
                     </div>
@@ -1232,7 +1232,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   {proteinData.features && proteinData.features.length > 0 && (
                     <div className="space-y-2">
                       <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                        <span>Miền cấu trúc & Vị trí hoạt động (1D Sequence Track)</span>
+                        <span>Domains & Active Sites (1D Sequence Track)</span>
                         <span className="font-mono text-[11px] text-slate-400">1 — {proteinData.seqLength} aa</span>
                       </div>
                       <div className="space-y-1.5">
@@ -1276,7 +1276,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   {proteinData.pdbCrossRefs && proteinData.pdbCrossRefs.length > 0 && (
                     <div className="space-y-2 pt-2 border-t border-white/[0.08]">
                       <span className="text-xs font-semibold text-slate-300">
-                        Chuyển đổi sang cấu trúc thực nghiệm RCSB PDB (X-ray / Cryo-EM):
+                        Switch to experimental RCSB PDB structure (X-ray / Cryo-EM):
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         {proteinData.pdbCrossRefs.map((pdb: string) => (
@@ -1301,19 +1301,19 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                     <button
                       onClick={() =>
                         onSendToChat(
-                          `Hãy phân tích cấu trúc 3D và cơ chế sinh học phân tử của protein ${proteinData.geneSymbol} (UniProt: ${proteinData.accession} - ${proteinData.proteinName}). Chức năng chính: ${proteinData.functionComment}`
+                          `Analyze 3D structure and molecular mechanisms of protein ${proteinData.geneSymbol} (UniProt: ${proteinData.accession} - ${proteinData.proteinName}). Curated function: ${proteinData.functionComment}`
                         )
                       }
                       className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 border border-cyan-500/30 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>Đưa thông tin Protein này sang Trò chuyện AI / LaTeX Studio</span>
+                      <span>Send Protein Data to Chat / LaTeX Studio</span>
                     </button>
                   )}
                 </div>
               ) : (
                 <div className="p-6 rounded-2xl bg-[#0c1221] border border-white/[0.08] text-xs text-slate-400">
-                  Nhập ký hiệu Gen hoặc mã UniProt để tải hồ sơ cấu trúc phân tử.
+                  Enter a Gene symbol or UniProt accession to load molecular structure.
                 </div>
               )}
             </div>
@@ -1327,14 +1327,14 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-bold text-white font-mono">
-                    Biến thể Lâm sàng NCBI ClinVar — Gen {genomicsGene}
+                    NCBI ClinVar Clinical Variants — Gene {genomicsGene}
                   </h3>
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30">
                     Pathogenic / Likely Pathogenic
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Dữ liệu biến thể di truyền người từ NCBI ClinVar (GRCh38) kết hợp liên kết đối chiếu AlphaGenome Atlas
+                  Human genetic variants from NCBI ClinVar (GRCh38) cross-referenced with AlphaGenome Atlas
                 </p>
               </div>
 
@@ -1345,7 +1345,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   rel="noreferrer"
                   className="px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-xs text-cyan-300 flex items-center gap-1.5"
                 >
-                  <span>Mở NCBI ClinVar</span>
+                  <span>Open NCBI ClinVar</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
                 <a
@@ -1363,8 +1363,8 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             {clinvarVariants.length === 0 ? (
               <div className="p-8 rounded-2xl bg-[#0c1221] border border-white/[0.08] text-center text-xs text-slate-400">
                 {isLoading
-                  ? 'Đang truy vấn cơ sở dữ liệu biến thể lâm sàng NCBI ClinVar...'
-                  : `Không tìm thấy biến thể Pathogenic trực tiếp cho "${genomicsGene}". Hãy thử TP53, BRCA1, EGFR hoặc PCSK9.`}
+                  ? 'Querying NCBI ClinVar clinical variant database...'
+                  : `No direct pathogenic variants found for "${genomicsGene}". Try TP53, BRCA1, EGFR, or PCSK9.`}
               </div>
             ) : (
               <div className="rounded-2xl bg-[#0c1221] border border-white/[0.08] overflow-hidden">
@@ -1373,11 +1373,11 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                     <thead>
                       <tr className="border-b border-white/[0.08] bg-white/[0.02] text-[11px] font-mono uppercase text-slate-400">
                         <th className="py-3 px-4">ClinVar ID</th>
-                        <th className="py-3 px-4">Biến thể / HGVS</th>
-                        <th className="py-3 px-4">Ý nghĩa Lâm sàng</th>
-                        <th className="py-3 px-4">Hệ quả Phân tử</th>
-                        <th className="py-3 px-4">Vị trí GRCh38</th>
-                        <th className="py-3 px-4">Hội chứng / Bệnh lý liên quan</th>
+                        <th className="py-3 px-4">Variant / HGVS</th>
+                        <th className="py-3 px-4">Clinical Significance</th>
+                        <th className="py-3 px-4">Molecular Consequence</th>
+                        <th className="py-3 px-4">GRCh38 Position</th>
+                        <th className="py-3 px-4">Associated Condition</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.06] text-xs">
@@ -1456,21 +1456,21 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1.5 border-b border-white/[0.06]">
-                      <span className="text-slate-400">Công thức phân tử:</span>
+                      <span className="text-slate-400">Molecular Formula:</span>
                       <span className="font-mono font-bold text-cyan-300">
                         {compoundProps.MolecularFormula}
                       </span>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.06]">
-                      <span className="text-slate-400">Diện tích bề mặt phân cực (TPSA):</span>
+                      <span className="text-slate-400">Polar Surface Area (TPSA):</span>
                       <span className="font-mono text-white">{compoundProps.TPSA ?? 'N/A'} Å²</span>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.06]">
-                      <span className="text-slate-400">Số liên kết xoay được (Rotatable Bonds):</span>
+                      <span className="text-slate-400">Rotatable Bonds:</span>
                       <span className="font-mono text-white">{compoundProps.RotatableBondCount ?? 'N/A'}</span>
                     </div>
                     <div className="space-y-1 pt-1">
-                      <span className="text-slate-400 block">Chuỗi Canonical SMILES:</span>
+                      <span className="text-slate-400 block">Canonical SMILES:</span>
                       <div className="p-2.5 rounded-lg bg-black/40 border border-white/[0.08] font-mono text-[11px] text-emerald-300 break-all">
                         {compoundProps.CanonicalSMILES || compoundProps.IsomericSMILES || 'N/A'}
                       </div>
@@ -1485,10 +1485,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <div>
                           <h4 className="text-sm font-bold text-white">
-                            Sàng lọc Dược động học Lipinski Rule of 5 (Oral Bioavailability)
+                            Lipinski Rule of 5 Pharmacokinetic Screening (Oral Bioavailability)
                           </h4>
                           <p className="text-xs text-slate-400">
-                            Đánh giá khả năng hấp thu đường uống dựa trên 4 ngưỡng hóa lý chuẩn
+                            Oral bioavailability assessment based on four physicochemical thresholds
                           </p>
                         </div>
                         <span
@@ -1499,8 +1499,8 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                           }`}
                         >
                           {lipinskiEval.drugLike
-                            ? `ĐẠT CHUẨN DRUG-LIKE (${lipinskiEval.violations} vi phạm)`
-                            : `CẢNH BÁO (${lipinskiEval.violations} vi phạm Ro5)`}
+                            ? `DRUG-LIKE COMPLIANT (${lipinskiEval.violations} violations)`
+                            : `ALERT (${lipinskiEval.violations} Ro5 violations)`}
                         </span>
                       </div>
 
@@ -1535,7 +1535,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                   <div className="p-5 rounded-2xl bg-[#0c1221] border border-white/[0.08] space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white">
-                        Hồ sơ Dược lý & Cơ chế Tác động (ChEMBL Bioactivity)
+                        Pharmacology & Bioactivity Profile (ChEMBL)
                       </h4>
                       {chemblInfo?.chemblId && (
                         <a
@@ -1554,21 +1554,21 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                       <div className="space-y-3">
                         <div className="grid grid-cols-3 gap-3 text-xs">
                           <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                            <div className="text-slate-400 text-[11px]">Giai đoạn Lâm sàng</div>
+                            <div className="text-slate-400 text-[11px]">Clinical Phase</div>
                             <div className="font-mono font-bold text-cyan-300 text-sm mt-0.5">
                               Phase {chemblInfo.maxPhase ?? 'N/A'}
                             </div>
                           </div>
                           <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                            <div className="text-slate-400 text-[11px]">Phân loại Phân tử</div>
+                            <div className="text-slate-400 text-[11px]">Molecule Type</div>
                             <div className="font-mono font-bold text-white text-sm mt-0.5">
                               {chemblInfo.moleculeType || 'Small molecule'}
                             </div>
                           </div>
                           <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                            <div className="text-slate-400 text-[11px]">Năm phê duyệt đầu tiên</div>
+                            <div className="text-slate-400 text-[11px]">First Approval Year</div>
                             <div className="font-mono font-bold text-emerald-300 text-sm mt-0.5">
-                              {chemblInfo.firstApproval || 'Đang thử nghiệm'}
+                              {chemblInfo.firstApproval || 'Investigational'}
                             </div>
                           </div>
                         </div>
@@ -1576,7 +1576,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                         {mechanisms.length > 0 && (
                           <div className="space-y-2 pt-2">
                             <div className="text-xs font-semibold text-slate-300">
-                              Cơ chế tác động phân tử (Mechanism of Action):
+                              Mechanism of Action (MoA):
                             </div>
                             {mechanisms.map((m, idx) => (
                               <div
@@ -1596,7 +1596,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                       </div>
                     ) : (
                       <p className="text-xs text-slate-400">
-                        Chưa có bản ghi cơ chế lâm sàng ChEMBL cho hợp chất này.
+                        No ChEMBL clinical mechanism record available for this compound.
                       </p>
                     )}
                   </div>
@@ -1605,8 +1605,8 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
             ) : (
               <div className="lg:col-span-12 p-8 rounded-2xl bg-[#0c1221] border border-white/[0.08] text-center text-xs text-slate-400">
                 {isLoading
-                  ? 'Đang phân tích cấu trúc hóa dược từ PubChem & ChEMBL...'
-                  : 'Nhập tên thuốc hoặc hợp chất (VD: Imatinib, Aspirin) để xem cấu trúc và kiểm tra Lipinski Rule of 5.'}
+                  ? 'Analyzing medicinal chemistry from PubChem & ChEMBL...'
+                  : 'Enter drug or compound name (e.g., Imatinib, Aspirin) to view structure and evaluate Lipinski Rule of 5.'}
               </div>
             )}
           </div>
@@ -1620,14 +1620,14 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-cyan-400" />
-                  <span>Bài báo Y sinh PubMed & Europe PMC ({papers.length})</span>
+                  <span>Biomedical Papers: PubMed & Europe PMC ({papers.length})</span>
                 </h3>
                 <span className="text-[11px] font-mono text-slate-400">[Peer-Reviewed Indexed]</span>
               </div>
 
               {papers.length === 0 ? (
                 <div className="p-6 rounded-2xl bg-[#0c1221] border border-white/[0.08] text-xs text-slate-400">
-                  {isLoading ? 'Đang tìm kiếm y văn PubMed / Europe PMC...' : 'Nhập từ khóa để tra cứu bài báo khoa học.'}
+                  {isLoading ? 'Searching PubMed / Europe PMC literature...' : 'Enter keywords to search biomedical literature.'}
                 </div>
               ) : (
                 papers.map((p, idx) => (
@@ -1646,7 +1646,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                           {p.journalTitle || 'Biomedical Journal'} • {p.pubYear}
                         </span>
                         <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300">
-                          Trích dẫn: {p.citedByCount || 0}
+                          Citations: {p.citedByCount || 0}
                         </span>
                       </div>
                       {p.pmid && (
@@ -1673,13 +1673,13 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                         <button
                           onClick={() =>
                             onSendToChat(
-                              `Hãy tóm tắt và trích xuất đóng góp phương pháp luận của bài báo PubMed (PMID: ${p.pmid}): "${p.title}" (${p.pubYear}). Tác giả: ${p.authorString}.`
+                              `Summarize key findings and methodological contributions of PubMed paper (PMID: ${p.pmid}): "${p.title}" (${p.pubYear}) by ${p.authorString}.`
                             )
                           }
                           className="text-[11px] text-cyan-300 hover:underline flex items-center gap-1"
                         >
                           <Send className="w-3 h-3" />
-                          <span>Trích dẫn vào Chat / LaTeX Studio</span>
+                          <span>Cite in Chat / LaTeX Studio</span>
                         </button>
                       </div>
                     )}
@@ -1693,14 +1693,14 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
-                  <span>Bản thảo Tiền ấn phẩm arXiv ({arxivPreprints.length})</span>
+                  <span>arXiv Preprints ({arxivPreprints.length})</span>
                 </h3>
                 <span className="text-[11px] font-mono text-purple-300">[Preprint Server]</span>
               </div>
 
               {arxivPreprints.length === 0 ? (
                 <div className="p-6 rounded-2xl bg-[#0c1221] border border-white/[0.08] text-xs text-slate-400">
-                  Không có bản thảo arXiv tương ứng.
+                  No matching arXiv preprints found.
                 </div>
               ) : (
                 arxivPreprints.map((arx, i) => (
@@ -1717,7 +1717,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
                           rel="noreferrer"
                           className="hover:underline flex items-center gap-1"
                         >
-                          <span>Mở arXiv</span>
+                          <span>Open arXiv</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       )}

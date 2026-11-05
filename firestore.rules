@@ -95,40 +95,32 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(userId)
         && request.auth.uid == userId
-        && isValidUserProfile(incoming())
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && isValidUserProfile(incoming());
       allow update: if isVerifiedUser()
         && isValidId(userId)
         && request.auth.uid == userId
         && isValidUserProfile(incoming())
         && existing().uid == request.auth.uid
         && incoming().uid == existing().uid
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'createdAt', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(userId) && existing().uid == request.auth.uid;
     }
 
     // 2. Chat Sessions (/sessions/{sessionId})
     match /sessions/{sessionId} {
-      allow get: if isSignedIn() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(sessionId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
       allow create: if isVerifiedUser()
         && isValidId(sessionId)
         && isValidChatSession(incoming())
-        && incoming().id == sessionId
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().id == sessionId;
       allow update: if isVerifiedUser()
         && isValidId(sessionId)
         && isValidChatSession(incoming())
         && existing().ownerId == request.auth.uid
         && incoming().id == existing().id
         && incoming().ownerId == existing().ownerId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'folderId', 'isPinned', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'folderId', 'isPinned', 'createdAt', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
 
       // 3. Session Messages Subcollection (/sessions/{sessionId}/messages/{messageId})
@@ -136,8 +128,7 @@ service cloud.firestore {
         allow get: if isSignedIn()
           && isValidId(sessionId)
           && isValidId(messageId)
-          && existing().ownerId == request.auth.uid
-          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+          && (resource == null || existing().ownerId == request.auth.uid);
         allow list: if isSignedIn()
           && existing().ownerId == request.auth.uid;
         allow create: if isVerifiedUser()
@@ -145,8 +136,6 @@ service cloud.firestore {
           && isValidId(messageId)
           && isValidChatMessage(incoming())
           && incoming().sessionId == sessionId
-          && incoming().createdAt == request.time
-          && exists(/databases/$(database)/documents/sessions/$(sessionId))
           && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
         allow update: if isVerifiedUser()
           && isValidId(sessionId)
@@ -156,8 +145,7 @@ service cloud.firestore {
           && incoming().ownerId == existing().ownerId
           && incoming().sessionId == existing().sessionId
           && incoming().role == existing().role
-          && incoming().createdAt == existing().createdAt
-          && incoming().diff(existing()).affectedKeys().hasOnly(['content'])
+          && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'createdAt'])
           && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
         allow delete: if isVerifiedUser()
           && isValidId(sessionId)
@@ -169,32 +157,27 @@ service cloud.firestore {
 
     // 4. User Memories (/memories/{memoryId})
     match /memories/{memoryId} {
-      allow get: if isSignedIn() && isValidId(memoryId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(memoryId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
       allow create: if isVerifiedUser()
         && isValidId(memoryId)
-        && isValidUserMemoryItem(incoming())
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && isValidUserMemoryItem(incoming());
       allow update: if isVerifiedUser()
         && isValidId(memoryId)
         && isValidUserMemoryItem(incoming())
         && existing().ownerId == request.auth.uid
         && incoming().ownerId == existing().ownerId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['key', 'value', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['key', 'value', 'createdAt', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(memoryId) && existing().ownerId == request.auth.uid;
     }
 
     // 5. Saved Bioscience Records (/bioscienceRecords/{recordId})
     match /bioscienceRecords/{recordId} {
-      allow get: if isSignedIn() && isValidId(recordId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(recordId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
       allow create: if isVerifiedUser()
         && isValidId(recordId)
-        && isValidBioscienceRecord(incoming())
-        && incoming().createdAt == request.time;
+        && isValidBioscienceRecord(incoming());
       allow update: if isVerifiedUser()
         && isValidId(recordId)
         && isValidBioscienceRecord(incoming())
@@ -202,8 +185,7 @@ service cloud.firestore {
         && incoming().ownerId == existing().ownerId
         && incoming().identifier == existing().identifier
         && incoming().category == existing().category
-        && incoming().createdAt == existing().createdAt
-        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'summary', 'sourceUrl']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'summary', 'sourceUrl', 'createdAt']);
       allow delete: if isVerifiedUser() && isValidId(recordId) && existing().ownerId == request.auth.uid;
     }
   }

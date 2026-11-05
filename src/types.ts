@@ -60,6 +60,15 @@ export interface ResearchQualityScores {
   overall: number;
 }
 
+export interface KeyInsightConclusion {
+  id: string;
+  title: string;
+  conclusion: string;
+  category: 'mechanism' | 'empirical' | 'architecture' | 'risk' | 'roadmap';
+  impactScore: number;
+  actionableTakeaway?: string;
+}
+
 export interface DeepResearchData {
   topic: string;
   outputFormat?: 'imrad_q1' | 'strategic_report';
@@ -68,6 +77,8 @@ export interface DeepResearchData {
   subQueries: string[];
   steps: ResearchStep[];
   keyTakeaways: string[];
+  strategicConclusions?: KeyInsightConclusion[];
+  isPinnedToThreadTop?: boolean;
   methodology: string;
   crossChecks?: ResearchCrossCheckItem[];
   peerReviews?: ResearchPeerReviewItem[];
@@ -119,6 +130,13 @@ export interface SelfEvolutionEvaluation {
   suggestedRule?: string;
   refinedResponse?: string;
   timestamp: string;
+  critique?: string;
+  wasRefined?: boolean;
+  originalScore?: number;
+  improvedScore?: number;
+  extractedMetaRule?: string;
+  learnedLesson?: string;
+  originalDraft?: string;
 }
 
 export interface EvolvedMetaRule {
@@ -130,6 +148,101 @@ export interface EvolvedMetaRule {
   active: boolean;
   appliedCount: number;
   createdAt: string;
+}
+
+export type BatchTaskType = 'deep_research' | 'auto_categorize' | 'memory_extraction' | 'reflexion_audit';
+export type BatchTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
+export type BatchPriorityLevel = 'critical' | 'high' | 'normal' | 'low';
+export type BatchModelTier = 'lite' | 'flash' | 'pro';
+
+export interface PriorityBatchConfig {
+  enabled: boolean;
+  tokenBudgetLimit: number;
+  liteThresholdTokens: number;
+  proThresholdTokens: number;
+  maxRetries: number;
+  baseBackoffMs: number;
+}
+
+export interface BatchTaskLog {
+  timestamp: string;
+  message: string;
+  type?: 'info' | 'success' | 'warn' | 'error';
+}
+
+export interface BatchTask {
+  id: string;
+  type: BatchTaskType;
+  title: string;
+  description: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  status: BatchTaskStatus;
+  progress: number; // 0 to 100
+  currentStepLabel?: string;
+  totalSteps?: number;
+  currentStepIndex?: number;
+  priority?: BatchPriorityLevel;
+  priorityScore?: number;
+  estimatedTokens?: number;
+  actualTokensUsed?: number;
+  modelTier?: BatchModelTier;
+  assignedModel?: string;
+  tierReason?: string;
+  retryCount?: number;
+  maxRetries?: number;
+  nextRetryAt?: number;
+  lastBackoffMs?: number;
+  lastError?: string;
+  params: {
+    query?: string;
+    sessionId?: string;
+    sessionIds?: string[];
+    sampleText?: string;
+    targetFormat?: string;
+    priority?: BatchPriorityLevel;
+    [key: string]: any;
+  };
+  result?: {
+    report?: string;
+    deepResearchData?: DeepResearchData;
+    categorizedCount?: number;
+    clusters?: TopicCluster[];
+    assignments?: ClusterCategorizeAssignment[];
+    memoriesAdded?: number;
+    notesAdded?: number;
+    details?: any;
+    error?: string;
+  };
+  logs: BatchTaskLog[];
+}
+
+export interface TopicCluster {
+  clusterId: string;
+  topic: string;
+  summary: string;
+  coreThemes: string[];
+  sessionIds: string[];
+  suggestedFolderId?: string | null;
+  folderMatchConfidence?: number;
+}
+
+export interface ClusterCategorizeAssignment {
+  sessionId: string;
+  folderId: string | null;
+  clusterId?: string;
+  clusterTopic?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface ClusterCategorizeResponse {
+  clusters: TopicCluster[];
+  assignments: ClusterCategorizeAssignment[];
+  totalCategorized: number;
+  modelUsed?: string;
+  reason?: string;
 }
 
 export interface Folder {
@@ -146,7 +259,7 @@ export interface Session {
   name: string;
   is_pinned?: number | boolean;
   folder_id?: string | null;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface PersonaQuickPrompt {
@@ -186,9 +299,15 @@ export interface AIIdentity {
   customDirectives?: string;
 }
 
+export type ReasoningEffortLevel = 'auto' | 'high' | 'medium' | 'low' | 'minimal';
+
 export interface ChatSettings {
   model?: string;
+  reasoningEffort?: ReasoningEffortLevel;
   smartQuotaMode?: boolean;
+  billingTierMode?: 'free_tier_lock' | 'smart_hybrid' | 'paid_pro';
+  skipBackgroundCalls?: boolean;
+  monthlyBudgetUsd?: number;
   selfImprovementMode?: boolean;
   evolvedRules?: EvolvedMetaRule[];
   systemInstruction: string;
@@ -339,7 +458,7 @@ export interface KnowledgeGraphData {
   };
 }
 
-export type StudioTheme = 'editorial' | 'dark' | 'midnight' | 'botanical' | 'terminal' | 'aurora';
+export type StudioTheme = 'light' | 'dark' | 'editorial' | 'midnight' | 'botanical' | 'terminal' | 'aurora';
 
 export interface ThemeInfo {
   id: StudioTheme;

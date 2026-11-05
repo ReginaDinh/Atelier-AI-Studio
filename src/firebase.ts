@@ -113,36 +113,53 @@ export function sanitizeFirestoreId(rawId: string): string {
   return cleaned.length > 0 ? cleaned : 'doc_default';
 }
 
+const docWriteLocks = new Map<string, Promise<unknown>>();
+
+async function withDocWriteLock<T>(path: string, task: () => Promise<T>): Promise<T> {
+  const previous = docWriteLocks.get(path) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => task());
+  docWriteLocks.set(path, next);
+  try {
+    return await next;
+  } finally {
+    if (docWriteLocks.get(path) === next) {
+      docWriteLocks.delete(path);
+    }
+  }
+}
+
 // 1. User Profile Sync (/users/{userId})
 export async function syncUserProfileToFirestore(user: FirebaseUser): Promise<void> {
   if (!user?.uid) return;
   const path = `users/${user.uid}`;
   const userRef = doc(db, 'users', user.uid);
-  try {
-    const snap = await getDoc(userRef);
-    const displayName = (user.displayName || user.email?.split('@')[0] || 'Researcher').slice(0, 120);
-    const photoURL = user.photoURL ? user.photoURL.slice(0, 1024) : undefined;
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(userRef);
+      const displayName = (user.displayName || user.email?.split('@')[0] || 'Researcher').slice(0, 120);
+      const photoURL = user.photoURL ? user.photoURL.slice(0, 1024) : undefined;
 
-    if (!snap.exists()) {
-      const payload: Record<string, unknown> = {
-        uid: user.uid,
-        displayName,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      if (photoURL) payload.photoURL = photoURL;
-      await setDoc(userRef, payload);
-    } else {
-      const updatePayload: Record<string, unknown> = {
-        displayName,
-        updatedAt: serverTimestamp(),
-      };
-      if (photoURL) updatePayload.photoURL = photoURL;
-      await updateDoc(userRef, updatePayload);
+      if (!snap.exists()) {
+        const payload: Record<string, unknown> = {
+          uid: user.uid,
+          displayName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (photoURL) payload.photoURL = photoURL;
+        await setDoc(userRef, payload);
+      } else {
+        const updatePayload: Record<string, unknown> = {
+          displayName,
+          updatedAt: serverTimestamp(),
+        };
+        if (photoURL) updatePayload.photoURL = photoURL;
+        await updateDoc(userRef, updatePayload);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  });
 }
 
 // 2. Chat Session Sync (/sessions/{sessionId})
@@ -158,35 +175,37 @@ export async function saveSessionToFirestore(session: {
   const path = `sessions/${docId}`;
   const sessionRef = doc(db, 'sessions', docId);
 
-  try {
-    const snap = await getDoc(sessionRef);
-    const name = (session.name || 'Cuộc trò chuyện mới').slice(0, 200);
-    const isPinned = Boolean(session.isPinned);
-    const folderId = session.folderId ? String(session.folderId).slice(0, 128) : undefined;
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(sessionRef);
+      const name = (session.name || 'New Chat').slice(0, 200);
+      const isPinned = Boolean(session.isPinned);
+      const folderId = session.folderId ? String(session.folderId).slice(0, 128) : undefined;
 
-    if (!snap.exists()) {
-      const payload: Record<string, unknown> = {
-        id: docId,
-        ownerId: user.uid,
-        name,
-        isPinned,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      if (folderId) payload.folderId = folderId;
-      await setDoc(sessionRef, payload);
-    } else {
-      const updatePayload: Record<string, unknown> = {
-        name,
-        isPinned,
-        updatedAt: serverTimestamp(),
-      };
-      if (folderId) updatePayload.folderId = folderId;
-      await updateDoc(sessionRef, updatePayload);
+      if (!snap.exists()) {
+        const payload: Record<string, unknown> = {
+          id: docId,
+          ownerId: user.uid,
+          name,
+          isPinned,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (folderId) payload.folderId = folderId;
+        await setDoc(sessionRef, payload);
+      } else {
+        const updatePayload: Record<string, unknown> = {
+          name,
+          isPinned,
+          updatedAt: serverTimestamp(),
+        };
+        if (folderId) updatePayload.folderId = folderId;
+        await updateDoc(sessionRef, updatePayload);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  });
 }
 
 export async function deleteSessionFromFirestore(sessionId: string): Promise<void> {
@@ -194,14 +213,16 @@ export async function deleteSessionFromFirestore(sessionId: string): Promise<voi
   if (!user) return;
   const docId = sanitizeFirestoreId(`${user.uid}_${sessionId}`);
   const path = `sessions/${docId}`;
-  try {
-    const snap = await getDoc(doc(db, 'sessions', docId));
-    if (snap.exists()) {
-      await deleteDoc(doc(db, 'sessions', docId));
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(doc(db, 'sessions', docId));
+      if (snap.exists()) {
+        await deleteDoc(doc(db, 'sessions', docId));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+  });
 }
 
 // 3. Chat Message Sync (/sessions/{sessionId}/messages/{messageId})
@@ -216,25 +237,27 @@ export async function saveMessageToFirestore(
   const path = `sessions/${sessionDocId}/messages/${msgDocId}`;
   const msgRef = doc(db, 'sessions', sessionDocId, 'messages', msgDocId);
 
-  try {
-    const snap = await getDoc(msgRef);
-    const content = message.content.slice(0, 99000);
-    if (!snap.exists()) {
-      await setDoc(msgRef, {
-        sessionId: sessionDocId,
-        ownerId: user.uid,
-        role: message.role === 'user' ? 'user' : 'model',
-        content,
-        createdAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(msgRef, {
-        content,
-      });
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(msgRef);
+      const content = message.content.slice(0, 99000);
+      if (!snap.exists()) {
+        await setDoc(msgRef, {
+          sessionId: sessionDocId,
+          ownerId: user.uid,
+          role: message.role === 'user' ? 'user' : 'model',
+          content,
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(msgRef, {
+          content,
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  });
 }
 
 // 4. User Memory Sync (/memories/{memoryId})
@@ -249,28 +272,30 @@ export async function saveMemoryToFirestore(memory: {
   const path = `memories/${memDocId}`;
   const memRef = doc(db, 'memories', memDocId);
 
-  try {
-    const snap = await getDoc(memRef);
-    const key = memory.key.trim().slice(0, 120);
-    const value = memory.value.trim().slice(0, 2000);
-    if (!snap.exists()) {
-      await setDoc(memRef, {
-        ownerId: user.uid,
-        key,
-        value,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(memRef, {
-        key,
-        value,
-        updatedAt: serverTimestamp(),
-      });
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(memRef);
+      const key = memory.key.trim().slice(0, 120);
+      const value = memory.value.trim().slice(0, 2000);
+      if (!snap.exists()) {
+        await setDoc(memRef, {
+          ownerId: user.uid,
+          key,
+          value,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(memRef, {
+          key,
+          value,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  });
 }
 
 export async function deleteMemoryFromFirestore(memoryIdOrKey: string | number): Promise<void> {
@@ -278,14 +303,16 @@ export async function deleteMemoryFromFirestore(memoryIdOrKey: string | number):
   if (!user) return;
   const memDocId = sanitizeFirestoreId(`${user.uid}_mem_${memoryIdOrKey}`);
   const path = `memories/${memDocId}`;
-  try {
-    const snap = await getDoc(doc(db, 'memories', memDocId));
-    if (snap.exists()) {
-      await deleteDoc(doc(db, 'memories', memDocId));
+  return withDocWriteLock(path, async () => {
+    try {
+      const snap = await getDoc(doc(db, 'memories', memDocId));
+      if (snap.exists()) {
+        await deleteDoc(doc(db, 'memories', memDocId));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+  });
 }
 
 // 5. Bioscience Record Persistence (/bioscienceRecords/{recordId})
@@ -391,4 +418,154 @@ export async function fetchCloudMemoriesForUser(userId: string): Promise<Array<{
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
+}
+
+export interface BidirectionalSyncReport {
+  hydratedSessions: number;
+  hydratedMessages: number;
+  hydratedMemories: number;
+  pushedSessions: number;
+  pushedMemories: number;
+}
+
+/**
+ * Two-Way Cloud Sync Engine:
+ * 1. Pulls all user-owned sessions, session messages, and memories from Firestore.
+ * 2. Hydrates them atomically into local SQLite via /api/cloud-sync/hydrate.
+ * 3. Pushes any local-only SQLite sessions and memories back to Firestore.
+ */
+export async function reconcileBidirectionalCloudSync(localUserId: string): Promise<BidirectionalSyncReport> {
+  const user = auth.currentUser;
+  if (!user || !localUserId) {
+    return {
+      hydratedSessions: 0,
+      hydratedMessages: 0,
+      hydratedMemories: 0,
+      pushedSessions: 0,
+      pushedMemories: 0,
+    };
+  }
+
+  const uidPrefix = `${sanitizeFirestoreId(user.uid)}_`;
+  const stripUidPrefix = (docId: string): string => {
+    if (docId.startsWith(uidPrefix)) {
+      return docId.slice(uidPrefix.length) || docId;
+    }
+    return docId;
+  };
+
+  // 1. Pull Cloud Sessions
+  let cloudSessionDocs: Array<{
+    docId: string;
+    id: string;
+    name: string;
+    isPinned: boolean;
+    folderId?: string;
+  }> = [];
+
+  try {
+    const sessionsQuery = query(collection(db, 'sessions'), where('ownerId', '==', user.uid));
+    const sessionsSnap = await getDocs(sessionsQuery);
+    cloudSessionDocs = sessionsSnap.docs.map(d => {
+      const data = d.data();
+      return {
+        docId: d.id,
+        id: stripUidPrefix(String(data.id || d.id)),
+        name: String(data.name || 'Cloud Chat'),
+        isPinned: Boolean(data.isPinned),
+        folderId: data.folderId ? String(data.folderId) : undefined,
+      };
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'sessions');
+  }
+
+  // 2. Pull Cloud Messages for top 15 sessions in parallel
+  const cloudMessages: Array<{ sessionId: string; role: 'user' | 'model'; content: string }> = [];
+  const sessionsToFetchMsgs = cloudSessionDocs.slice(0, 15);
+  await Promise.all(
+    sessionsToFetchMsgs.map(async s => {
+      const msgPath = `sessions/${s.docId}/messages`;
+      try {
+        const msgsQuery = query(
+          collection(db, 'sessions', s.docId, 'messages'),
+          where('ownerId', '==', user.uid)
+        );
+        const msgsSnap = await getDocs(msgsQuery);
+        msgsSnap.docs.forEach(md => {
+          const mData = md.data();
+          if (mData.content) {
+            cloudMessages.push({
+              sessionId: s.id,
+              role: mData.role === 'user' ? 'user' : 'model',
+              content: String(mData.content),
+            });
+          }
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, msgPath);
+      }
+    })
+  );
+
+  // 3. Pull Cloud Memories
+  const cloudMemories = await fetchCloudMemoriesForUser(user.uid);
+
+  // 4. Hydrate into Local SQLite
+  const res = await fetch('/api/cloud-sync/hydrate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: localUserId,
+      cloudSessions: cloudSessionDocs,
+      cloudMessages,
+      cloudMemories,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to hydrate cloud data into local database');
+  }
+
+  const hydrationResult = await res.json().catch(() => ({} as any));
+
+  // 5. Push Local-Only Sessions & Memories back to Firestore
+  const cloudSessionIds = new Set(cloudSessionDocs.map(cs => cs.id));
+  const cloudMemoryKeys = new Set(cloudMemories.map(cm => cm.key.toLowerCase().trim()));
+
+  let pushedSessions = 0;
+  let pushedMemories = 0;
+
+  const localSessions: any[] = Array.isArray(hydrationResult.localSessions) ? hydrationResult.localSessions : [];
+  for (const ls of localSessions.slice(0, 20)) {
+    if (ls && ls.id && !cloudSessionIds.has(ls.id)) {
+      await saveSessionToFirestore({
+        id: ls.id,
+        name: ls.name || 'Chat',
+        folderId: ls.folder_id || undefined,
+        isPinned: Boolean(ls.is_pinned),
+      }).catch(() => {});
+      pushedSessions++;
+    }
+  }
+
+  const localMemories: any[] = Array.isArray(hydrationResult.localMemories) ? hydrationResult.localMemories : [];
+  for (const lm of localMemories.slice(0, 30)) {
+    if (lm && lm.key && lm.value && !cloudMemoryKeys.has(String(lm.key).toLowerCase().trim())) {
+      await saveMemoryToFirestore({
+        id: lm.id,
+        key: lm.key,
+        value: lm.value,
+      }).catch(() => {});
+      pushedMemories++;
+    }
+  }
+
+  return {
+    hydratedSessions: Number(hydrationResult.hydratedSessions || 0),
+    hydratedMessages: Number(hydrationResult.hydratedMessages || 0),
+    hydratedMemories: Number(hydrationResult.hydratedMemories || 0),
+    pushedSessions,
+    pushedMemories,
+  };
 }

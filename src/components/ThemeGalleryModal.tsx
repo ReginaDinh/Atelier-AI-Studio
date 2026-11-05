@@ -25,93 +25,33 @@ interface ThemeGalleryModalProps {
 export const THEMES_LIST: (ThemeInfo & { icon: any; philosophy: string; tags: string[] })[] = [
   {
     id: 'editorial',
-    name: 'Atelier Editorial (Giấy Mộc)',
-    subtitle: 'Claude 3.7 / Notion / Báo chí tinh hoa',
-    desc: 'Bề mặt giấy ngà ấm áp, kiểu chữ Arial thanh lịch, sắc nét và cực kỳ dễ đọc tiếng Việt. Tối ưu cho người đọc, viết lách và tư duy lâu mà không mỏi mắt.',
-    mood: 'Tri thức · Sang trọng · Điềm tĩnh',
-    badge: 'Mặc định khuyên dùng',
+    name: 'Atelier Light',
+    subtitle: 'Warm Editorial Canvas',
+    desc: 'Warm ivory canvas with refined typography, optimized for reading, writing, and extended focus without eye fatigue.',
+    mood: 'Scholarly · Serene',
+    badge: 'Light',
     bgHex: '#fbfaf8',
     surfaceHex: '#ffffff',
-    accentHex: '#c25e36',
-    fontVibe: '100% Arial Sans-serif',
+    accentHex: '#b45309',
+    fontVibe: 'Google Sans + Google Sans Mono',
     icon: BookOpen,
-    philosophy: 'Đem cảm giác của trang sách in cao cấp vào không gian trí tuệ nhân tạo.',
-    tags: ['Tông sáng ấm', 'Dễ đọc', 'Arial Typography']
+    philosophy: 'Brings the tactile feel of fine editorial print into an AI workspace.',
+    tags: ['Warm Canvas', 'High Legibility', 'Clean Typography']
   },
   {
     id: 'dark',
-    name: 'Obsidian Minimal (Đá Đen Tối Giản)',
-    subtitle: 'Linear / Cursor / Vercel Developer Dark',
-    desc: 'Gam màu đen than chì sâu thẳm (#0f1012), tương phản tinh tế với viền vi tính mảnh 1px, ánh xanh cobalt công nghệ cao. Tuyệt đối không chói, loại bỏ mọi chi tiết thừa.',
-    mood: 'Chuyên nghiệp · Kỹ thuật · Tinh gọn',
-    badge: 'Được Dev yêu thích',
-    bgHex: '#0f1012',
-    surfaceHex: '#151619',
-    accentHex: '#3b82f6',
-    fontVibe: 'Inter + JetBrains Mono',
-    icon: Layers,
-    philosophy: 'Thiết kế chuẩn mực cho giới lập trình viên và quản lý sản phẩm công nghệ.',
-    tags: ['Tối giản', 'Monochrome Dark', 'High Contrast']
-  },
-  {
-    id: 'midnight',
-    name: 'Nordic Slate (Phiến Đá Bắc Âu)',
-    subtitle: 'Perplexity / Oceanic Raycast Space',
-    desc: 'Hòa quyện giữa màu xanh đại dương thẳm (#0a0e17) và ánh lam thiên thanh lấp lánh (#38bdf8). Tạo cảm giác chiều sâu vô tận như đang làm việc trong một trạm điều khiển vũ trụ tĩnh lặng.',
-    mood: 'Bí ẩn · Tập trung cao độ · Mát dịu',
-    badge: 'Chiều sâu quang học',
-    bgHex: '#0a0e17',
-    surfaceHex: '#101624',
+    name: 'Obsidian Dark',
+    subtitle: 'Developer Minimalist',
+    desc: 'Deep charcoal canvas (#0d0f12) with refined 1px hairline borders and high-contrast sapphire accents.',
+    mood: 'Technical · Minimal',
+    badge: 'Dark',
+    bgHex: '#0d0f12',
+    surfaceHex: '#14171d',
     accentHex: '#38bdf8',
-    fontVibe: 'Plus Jakarta Sans Display',
-    icon: Compass,
-    philosophy: 'Mang đại dương và ánh trăng Bắc cực vào từng pixel giao diện.',
-    tags: ['Deep Navy', 'Oceanic Glow', 'Glass Accents']
-  },
-  {
-    id: 'botanical',
-    name: 'Kyoto Zen (Mộc Thảo Trà Đạo)',
-    subtitle: 'Wabi-Sabi / Organic Botanical Canvas',
-    desc: 'Nền kem nhạt lấy cảm hứng từ giấy Washi kết hợp màu xanh lá Matcha (#2d5a3f) và rêu đá. Đem lại sự an nhiên, tĩnh lặng cho tâm trí khi đối thoại và nghiên cứu.',
-    mood: 'Thư thái · Cân bằng · Tự nhiên',
-    badge: 'Chữa lành & Tĩnh tâm',
-    bgHex: '#f4f6f1',
-    surfaceHex: '#ffffff',
-    accentHex: '#2d5a3f',
-    fontVibe: 'Clean Organic Sans',
-    icon: Feather,
-    philosophy: 'Triết lý Wabi-Sabi tôn vinh sự mộc mạc, hài hòa và gắn kết với thiên nhiên.',
-    tags: ['Matcha Green', 'Washi Paper', 'Zen Mood']
-  },
-  {
-    id: 'terminal',
-    name: 'Cyber Terminal (Hacker Phosphor CRT)',
-    subtitle: 'Retro Hacker / Neon Matrix Monospace',
-    desc: 'Toàn bộ giao diện khoác lên lớp áo màn hình Phosphor màu ngọc bích (#10b981) trên nền đen sâu thẳm (#050807), sử dụng 100% phông chữ JetBrains Mono sắc nét như máy trạm mainframe.',
-    mood: 'Futuristic · Cyberpunk · Code-Centric',
-    badge: 'Retro Terminal',
-    bgHex: '#050807',
-    surfaceHex: '#0a100d',
-    accentHex: '#10b981',
-    fontVibe: '100% JetBrains Mono',
-    icon: TerminalIcon,
-    philosophy: 'Hồi sinh vẻ đẹp của kỷ nguyên điện toán thuần chất và văn hóa hacker.',
-    tags: ['CRT Phosphor', 'Full Monospace', 'Cyberpunk Matrix']
-  },
-  {
-    id: 'aurora',
-    name: 'Cosmic Aurora (VisionOS Nebula Glass)',
-    subtitle: 'Apple VisionOS / Holographic Frosted Glass',
-    desc: 'Giao diện kính mờ acrylic đa tầng trên nền vũ trụ thâm sâu (#080714) kết hợp hiệu ứng gradient cực quang cực quang tím nebula (#c084fc) và hồng thạch anh. Trải nghiệm thị giác lộng lẫy và hiện đại bậc nhất.',
-    mood: 'Huyền ảo · Thời thượng · Thị giác cao cấp',
-    badge: 'Không gian 3D Glass',
-    bgHex: '#080714',
-    surfaceHex: '#100f24',
-    accentHex: '#c084fc',
-    fontVibe: 'Plus Jakarta Display + Glow',
-    icon: Zap,
-    philosophy: 'Khai phóng tiềm năng thị giác với phong cách Spatial Computing thế hệ mới.',
-    tags: ['Frosted Acrylic', 'Nebula Purple', 'Spatial Vibe']
+    fontVibe: 'Google Sans + Google Sans Mono',
+    icon: Layers,
+    philosophy: 'Architectural minimalism engineered for deep focus and precision.',
+    tags: ['Developer Dark', 'High Contrast', 'Minimal']
   }
 ];
 
@@ -164,18 +104,18 @@ export default function ThemeGalleryModal({
               </div>
               <div>
                 <h2 className="text-base sm:text-lg font-display font-bold flex items-center gap-2">
-                  <span>Bộ Sưu Tập Thiết Kế Giao Diện</span>
+                  <span>Theme Gallery</span>
                   <span className={cn(
                     "text-[11px] font-mono font-medium px-2 py-0.5 rounded-full border",
                     isLight 
                       ? "bg-amber-50 border-amber-300 text-amber-900" 
                       : "bg-white/10 border-white/15 text-slate-300"
                   )}>
-                    6 Phong Cách
+                    2 Themes
                   </span>
                 </h2>
                 <p className={cn("text-xs", isLight ? "text-[#7a7469]" : "text-[#8e95a5]")}>
-                  Chọn phong cách thị giác phù hợp nhất với tâm trạng và phong cách làm việc của bạn.
+                  Select your preferred visual atmosphere and colorway.
                 </p>
               </div>
             </div>
@@ -292,17 +232,17 @@ export default function ThemeGalleryModal({
                           <div 
                             className="w-4 h-4 rounded-full border border-black/20 shadow-xs" 
                             style={{ backgroundColor: theme.bgHex }}
-                            title="Màu nền chính"
+                            title="Primary background"
                           />
                           <div 
                             className="w-4 h-4 rounded-full border border-black/20 shadow-xs" 
                             style={{ backgroundColor: theme.surfaceHex }}
-                            title="Màu thẻ nổi"
+                            title="Card surface"
                           />
                           <div 
                             className="w-4 h-4 rounded-full border border-black/20 shadow-xs" 
                             style={{ backgroundColor: theme.accentHex }}
-                            title="Màu điểm nhấn"
+                            title="Accent color"
                           />
                         </div>
                         <span className={isLight ? "text-[#8a8376]" : "text-[#707788]"}>
@@ -328,11 +268,11 @@ export default function ThemeGalleryModal({
                         {isSelected ? (
                           <>
                             <Check size={13} strokeWidth={2.5} className="shrink-0" />
-                            <span>Đang sử dụng</span>
+                            <span>Active</span>
                           </>
                         ) : (
                           <>
-                            <span>Chọn giao diện này</span>
+                            <span>Apply Theme</span>
                             <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform shrink-0" />
                           </>
                         )}
@@ -351,7 +291,7 @@ export default function ThemeGalleryModal({
           )}>
             <div className="flex items-center gap-2">
               <Sparkles size={14} className={isLight ? "text-amber-700" : "text-sky-400"} />
-              <span>Giao diện tự động lưu vào trình duyệt của bạn và áp dụng tức thì không cần tải lại trang.</span>
+              <span>Theme preference is saved locally and applies instantly without reload.</span>
             </div>
             <button
               onClick={onClose}
@@ -360,7 +300,7 @@ export default function ThemeGalleryModal({
                 isLight ? "bg-[#2b2723] text-white hover:bg-[#3d3731]" : "bg-white/15 hover:bg-white/20 text-white border-white/10"
               )}
             >
-              Hoàn tất
+              Done
             </button>
           </div>
         </motion.div>

@@ -20,14 +20,14 @@ import VectorIcon from './VectorIcon';
 
 export const DEFAULT_AI_IDENTITY: AIIdentity = {
   name: 'Gemini Atelier',
-  title: 'Cố vấn Trí tuệ & Kiến trúc Sư cấp cao',
+  title: 'Cognitive Advisor & Principal Architect',
   avatar: '🧠',
-  pronounAI: 'Tôi',
-  pronounUser: 'Bạn',
+  pronounAI: 'I',
+  pronounUser: 'You',
   tone: 'objective',
-  domain: 'Kiến trúc Phần mềm, Phản biện Logic & Nghiên cứu Đa tầng',
-  bio: 'Kiên định bảo vệ chân lý khách quan, tư duy từ nguyên lý đầu tiên (First Principles) và đồng hành sáng tạo.',
-  customDirectives: '- Luôn giải thích các kiến trúc và quy trình bằng sơ đồ Mermaid (```mermaid ... ```).\n- Phản biện công tâm, chỉ ra ngụy biện logic nếu phát hiện.\n- Trả lời có cấu trúc mạch lạc, tránh văn phong sáo rỗng hoặc tâng bốc người dùng.'
+  domain: 'Software Architecture, Logical Reasoning & Deep Research',
+  bio: 'Grounded in first principles, objective truth, and cognitive rigor.',
+  customDirectives: '- Illustrate architecture and pipelines with Mermaid diagrams (```mermaid ... ```).\n- Counter fallacies objectively and rigorously.\n- Keep answers structured, lucid, and devoid of sycophancy.'
 };
 
 export const AI_IDENTITY_PRESETS: {
@@ -46,66 +46,66 @@ export const AI_IDENTITY_PRESETS: {
   {
     id: 'sovereign',
     name: 'Atelier Sovereign',
-    title: 'Cố vấn Tư duy Kiên định & Phản biện Độc lập',
+    title: 'Sovereign Advisor & First-Principles Critic',
     avatar: '🛡️',
-    pronounAI: 'Tôi',
-    pronounUser: 'Bạn',
+    pronounAI: 'I',
+    pronounUser: 'You',
     tone: 'objective',
-    domain: 'Phản biện Logic, Kiểm chứng Tiền đề & Chiến lược',
-    bio: 'Không xu nịnh, kiểm chứng các giả định ngầm định và kiên quyết bảo vệ chân lý khách quan.',
-    customDirectives: '- Luôn bóc tách câu hỏi theo nguyên lý gốc (First Principles).\n- Chỉ ra các ngụy biện logic (logical fallacies) với tinh thần tôn trọng nhưng kiên định.\n- Đưa ra 2 mặt của vấn đề trước khi kết luận.',
+    domain: 'Logical Rigor, Assumption Testing & Strategy',
+    bio: 'Uncompromising objectivity, dismantling hidden assumptions with strict adherence to facts.',
+    customDirectives: '- Deconstruct queries from first principles.\n- Explicitly identify logical fallacies respectfully and firmly.\n- Present trade-offs and counter-arguments before conclusions.',
     accent: 'from-amber-600 to-orange-700'
   },
   {
     id: 'architect',
     name: 'Archimedes Tech Lead',
-    title: 'Kỹ sư Trưởng Kiến trúc Hệ thống & Phần mềm',
+    title: 'Principal Systems & Software Architect',
     avatar: '💻',
-    pronounAI: 'Tôi',
-    pronounUser: 'Bạn',
+    pronounAI: 'I',
+    pronounUser: 'You',
     tone: 'professional',
-    domain: 'Full-Stack Architecture, Distributed Systems & Database Design',
-    bio: 'Tối ưu hóa hiệu năng, clean code, sơ đồ hóa kiến trúc luồng dữ liệu và giải pháp sản xuất.',
-    customDirectives: '- Khi đề cập đến luồng dữ liệu, kiến trúc hay cơ chế hệ thống, luôn vẽ sơ đồ Mermaid (```mermaid flowchart/sequenceDiagram ... ```).\n- Mã nguồn phải có bình luận rõ ràng, tuân thủ nguyên tắc SOLID và Clean Code.\n- Phân tích rủi ro kỹ thuật và khả năng mở rộng (scalability).',
+    domain: 'Full-Stack Architecture, Distributed Systems & DB Design',
+    bio: 'High performance, clean architecture, dataflow diagrams, and production engineering.',
+    customDirectives: '- Graph system flows and architecture with Mermaid (```mermaid flowchart/sequenceDiagram ... ```).\n- Write modular, idiomatic code adhering to SOLID principles.\n- Analyze failure modes, scalability, and technical debt.',
     accent: 'from-emerald-600 to-teal-700'
   },
   {
     id: 'advisor',
     name: 'Eleanor Strategic Advisor',
-    title: 'Chuyên gia Tư vấn Chiến lược & Quản trị Cấp cao',
+    title: 'Senior Strategy & Management Consultant',
     avatar: '📊',
-    pronounAI: 'Tôi',
-    pronounUser: 'Quý khách',
+    pronounAI: 'I',
+    pronounUser: 'You',
     tone: 'professional',
-    domain: 'Chiến lược Doanh nghiệp, Phân tích Thị trường & Quản trị Rủi ro',
-    bio: 'Định lượng hóa các quyết định kinh doanh, áp dụng các khung tư duy hàng đầu (SWOT, MECE, P&L).',
-    customDirectives: '- Luôn định lượng hóa các tác động tài chính và chi phí cơ hội.\n- Cấu trúc câu trả lời theo nguyên tắc MECE (Mutually Exclusive, Collectively Exhaustive).\n- Đề xuất lộ trình triển khai theo các giai đoạn rõ ràng (Actionable Roadmap).',
+    domain: 'Corporate Strategy, Market Analysis & Risk Management',
+    bio: 'Quantified decisions using MECE frameworks, unit economics, and actionable roadmaps.',
+    customDirectives: '- Quantify financial impact and opportunity costs.\n- Structure solutions using MECE frameworks.\n- Provide concrete milestone phases and actionable execution steps.',
     accent: 'from-indigo-600 to-blue-700'
   },
   {
     id: 'polymath',
     name: 'Professor Polymath',
-    title: 'Giáo sư Bác học Đa ngành & Nhà Nghiên cứu Khoa học',
+    title: 'Interdisciplinary Scholar & Research Scientist',
     avatar: '🎓',
-    pronounAI: 'Thầy/Tôi',
-    pronounUser: 'Bạn',
+    pronounAI: 'I',
+    pronounUser: 'You',
     tone: 'pedagogical',
-    domain: 'Toán học, Khoa học Tự nhiên, Triết học & Lịch sử Tư tưởng',
-    bio: 'Giảng giải sâu sắc những khái niệm phức tạp một cách sinh động từ cội nguồn bản chất.',
-    customDirectives: '- Dùng các phép ẩn dụ trực quan và phân tích lịch sử để làm sáng tỏ bản chất khái niệm.\n- Đặt câu hỏi gợi mở tư duy (Socratic method) sau mỗi phần phân tích.\n- Giải thích cặn kẽ các tiên đề khoa học.',
+    domain: 'Mathematics, Natural Sciences & History of Ideas',
+    bio: 'Explains complex paradigms intuitively from core axioms.',
+    customDirectives: '- Use intuitive analogies and historical context to clarify concepts.\n- Pose Socratic reflection questions to deepen conceptual intuition.\n- State scientific theorems, axioms, and boundary conditions clearly.',
     accent: 'from-purple-600 to-violet-700'
   },
   {
     id: 'minimalist',
     name: 'Nexus Pragmatist',
-    title: 'Kỹ sư Thực chiến Tối giản & Tinh gọn',
+    title: 'Pragmatic Systems Engineer',
     avatar: '⚡',
-    pronounAI: 'Tôi',
-    pronounUser: 'Bạn',
+    pronounAI: 'I',
+    pronounUser: 'You',
     tone: 'concise',
-    domain: 'Tối ưu Năng suất, Khắc phục Sự cố & Trả lời Trực diện',
-    bio: 'Không mở bài rườm rà, đi thẳng vào đáp án và giải pháp thực thi tức thì.',
-    customDirectives: '- Đi thẳng vào giải pháp và kết quả, không viết lời mở đầu chào hỏi xã giao.\n- Dùng gạch đầu dòng ngắn gọn, cô đọng.\n- Đưa ra ngay ví dụ mẫu có thể copy/paste áp dụng ngay.',
+    domain: 'Rapid Troubleshooting, Performance & Direct Solutions',
+    bio: 'Zero preamble or filler; delivers direct, actionable code and immediate fixes.',
+    customDirectives: '- Jump straight to solutions without pleasantries or introductory filler.\n- Use bulleted lists and concise steps.\n- Provide drop-in, copy-pasteable snippets.',
     accent: 'from-cyan-600 to-blue-700'
   }
 ];
@@ -113,18 +113,18 @@ export const AI_IDENTITY_PRESETS: {
 const AVATAR_OPTIONS = ['🧠', '🤖', '🛡️', '💻', '📊', '🎓', '⚡', '💎', '🦉', '🎯', '🚀', '🔮', '🧭', '🔬', '⚖️', '🌟'];
 
 const PRONOUN_PRESETS = [
-  { label: 'Tôi — Bạn', ai: 'Tôi', user: 'Bạn', desc: 'Chuẩn mực, lịch sự, khách quan (Khuyến nghị)' },
-  { label: 'Em — Anh/Chị', ai: 'Em', user: 'Anh/Chị', desc: 'Thân thiện, tôn trọng, lễ phép' },
-  { label: 'Chuyên gia — Quý khách', ai: 'Chuyên gia', user: 'Quý khách', desc: 'Trang trọng, dịch vụ cao cấp' },
-  { label: 'Mình — Bạn', ai: 'Mình', user: 'Bạn', desc: 'Gần gũi, cởi mở, phong cách đồng đội' },
+  { label: 'I — You', ai: 'I', user: 'You', desc: 'Standard, polite, objective (Recommended)' },
+  { label: 'Assistant — User', ai: 'Assistant', user: 'User', desc: 'Formal and technical' },
+  { label: 'Advisor — Partner', ai: 'Advisor', user: 'Partner', desc: 'Collaborative partnership' },
+  { label: 'We — You', ai: 'We', user: 'You', desc: 'Collective engineering perspective' },
 ];
 
 const TONE_OPTIONS: { id: AIIdentity['tone']; label: string; desc: string }[] = [
-  { id: 'objective', label: 'Khách quan & Phản biện', desc: 'Thẳng thắn, logic chặt chẽ, chống xu nịnh' },
-  { id: 'professional', label: 'Điềm đạm & Chuyên nghiệp', desc: 'Chuẩn mực chuyên gia cao cấp, lịch thiệp' },
-  { id: 'pedagogical', label: 'Tận tâm & Sư phạm', desc: 'Giải thích cặn kẽ từ nguyên lý gốc (First Principles)' },
-  { id: 'concise', label: 'Thực dụng & Tối giản', desc: 'Đi thẳng vào cốt lõi, không vòng vo' },
-  { id: 'creative', label: 'Sáng tạo & Đột phá', desc: 'Giàu cảm hứng, liên tưởng đa chiều' }
+  { id: 'objective', label: 'Objective & Critical', desc: 'Direct, logical, anti-sycophantic' },
+  { id: 'professional', label: 'Calm & Professional', desc: 'Executive expert standards, courteous' },
+  { id: 'pedagogical', label: 'Didactic & Socratic', desc: 'Explains from first principles' },
+  { id: 'concise', label: 'Pragmatic & Succinct', desc: 'Direct to core facts, no fluff' },
+  { id: 'creative', label: 'Creative & Divergent', desc: 'Lateral thinking, visionary links' }
 ];
 
 interface AIIdentityModalProps {
@@ -231,19 +231,19 @@ export default function AIIdentityModal({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold tracking-tight">Hồ sơ & Định danh AI</h2>
+                  <h2 className="text-base font-bold tracking-tight">AI Identity & Persona</h2>
                   <span className={cn(
                     "text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold",
                     isEditorial ? "bg-amber-100 text-amber-900" : "bg-white/10 text-sky-300"
                   )}>
-                    AI Identity Hub
+                    Identity Hub
                   </span>
                 </div>
                 <p className={cn(
                   "text-xs leading-normal",
                   isEditorial ? "text-[#706a61]" : "text-slate-400"
                 )}>
-                  Tùy chỉnh tên gọi, avatar, cách xưng hô và quy tắc nhận thức đặc trưng cho AI
+                  Configure persona name, avatar, addressing rules, and core cognitive directives
                 </p>
               </div>
             </div>
@@ -272,7 +272,7 @@ export default function AIIdentityModal({
               )}
             >
               <UserCheck size={13} />
-              <span>Cấu hình Định danh</span>
+              <span>Identity Profile</span>
             </button>
             <button
               type="button"
@@ -285,7 +285,7 @@ export default function AIIdentityModal({
               )}
             >
               <Sparkles size={13} />
-              <span>5 Bộ Định danh mẫu</span>
+              <span>5 Curated Presets</span>
             </button>
           </div>
 
@@ -295,7 +295,7 @@ export default function AIIdentityModal({
               /* Presets Grid */
               <div className="space-y-3">
                 <p className={cn("text-xs", isEditorial ? "text-[#706a61]" : "text-slate-400")}>
-                  Chọn một trong 5 bộ định danh mẫu được thiết kế sẵn để AI lập tức thay đổi toàn bộ phong cách xưng hô và nhận thức:
+                  Select a curated identity preset to switch the AI tone, addressing rules, and reasoning directives:
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {AI_IDENTITY_PRESETS.map((preset) => {
@@ -348,7 +348,7 @@ export default function AIIdentityModal({
                             "px-1.5 py-0.5 rounded border",
                             isEditorial ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-white/5 border-white/10 text-sky-300"
                           )}>
-                            Xưng: {preset.pronounAI} — Gọi: {preset.pronounUser}
+                            {preset.pronounAI} → {preset.pronounUser}
                           </span>
                           <span className="opacity-60 truncate max-w-[120px]">{preset.domain.split(',')[0]}</span>
                         </div>
@@ -382,11 +382,11 @@ export default function AIIdentityModal({
                             "text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-semibold",
                             isEditorial ? "bg-amber-200/80 text-amber-900" : "bg-sky-500/20 text-sky-300"
                           )}>
-                            Định danh hiện tại
+                            Active Persona
                           </span>
                         </div>
                         <div className={cn("text-xs font-medium mt-0.5", isEditorial ? "text-amber-800" : "text-sky-300")}>
-                          {form.title || 'Cố vấn Trí tuệ'}
+                          {form.title || 'Cognitive Advisor'}
                         </div>
                       </div>
                     </div>
@@ -396,15 +396,15 @@ export default function AIIdentityModal({
                         "inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-lg border",
                         isEditorial ? "bg-white border-amber-300 text-amber-900" : "bg-white/5 border-white/10 text-slate-300"
                       )}>
-                        <span>{form.pronounAI || 'Tôi'}</span>
+                        <span>{form.pronounAI || 'I'}</span>
                         <span className="opacity-50">→</span>
-                        <span>{form.pronounUser || 'Bạn'}</span>
+                        <span>{form.pronounUser || 'You'}</span>
                       </span>
                     </div>
                   </div>
 
                   <p className={cn("text-xs leading-relaxed mt-2.5 pt-2 border-t", isEditorial ? "text-[#5e584f] border-amber-200/50" : "text-slate-300 border-white/[0.06]")}>
-                    {form.bio || 'Chưa thiết lập phương châm hoạt động.'}
+                    {form.bio || 'No operating bio configured.'}
                   </p>
                 </div>
 
@@ -412,12 +412,12 @@ export default function AIIdentityModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {/* AI Name */}
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold block">Tên AI (AI Name)</label>
+                    <label className="text-xs font-semibold block">AI Name</label>
                     <input 
                       type="text"
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder="VD: Gemini Atelier, Archimedes..."
+                      placeholder="e.g. Gemini Atelier, Archimedes..."
                       className={cn(
                         "w-full h-8.5 px-3 rounded-lg border text-xs focus:outline-none transition-all",
                         isEditorial 
@@ -429,12 +429,12 @@ export default function AIIdentityModal({
 
                   {/* AI Title */}
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold block">Chức danh / Danh vị (Title)</label>
+                    <label className="text-xs font-semibold block">Title / Specialty</label>
                     <input 
                       type="text"
                       value={form.title}
                       onChange={(e) => setForm({ ...form, title: e.target.value })}
-                      placeholder="VD: Kỹ sư Trưởng, Cố vấn Chiến lược..."
+                      placeholder="e.g. Principal Architect, Strategic Advisor..."
                       className={cn(
                         "w-full h-8.5 px-3 rounded-lg border text-xs focus:outline-none transition-all",
                         isEditorial 
@@ -447,7 +447,7 @@ export default function AIIdentityModal({
 
                 {/* Avatar Vector Icon Selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold block">Biểu tượng Nhận diện Vector (Avatar)</label>
+                  <label className="text-xs font-semibold block">Avatar Vector Icon</label>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {AVATAR_OPTIONS.map((emoji) => (
                       <button
@@ -473,7 +473,7 @@ export default function AIIdentityModal({
 
                 {/* Pronouns Preset Selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold block">Quy tắc Xưng hô (Pronouns & Addressing)</label>
+                  <label className="text-xs font-semibold block">Addressing & Pronouns</label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {PRONOUN_PRESETS.map((p) => {
                       const isActive = form.pronounAI === p.ai && form.pronounUser === p.user;
@@ -504,7 +504,7 @@ export default function AIIdentityModal({
                       type="text"
                       value={form.pronounAI}
                       onChange={(e) => setForm({ ...form, pronounAI: e.target.value })}
-                      placeholder="AI tự xưng (VD: Tôi, Em...)"
+                      placeholder="AI self-reference (e.g. I, We...)"
                       className={cn(
                         "h-8 px-2.5 rounded-lg border text-xs focus:outline-none",
                         isEditorial ? "bg-white border-[#ded7ca] text-[#1e1d1b]" : "bg-[#080b11] border-white/[0.1] text-white"
@@ -514,7 +514,7 @@ export default function AIIdentityModal({
                       type="text"
                       value={form.pronounUser}
                       onChange={(e) => setForm({ ...form, pronounUser: e.target.value })}
-                      placeholder="AI gọi người dùng (VD: Bạn, Anh/Chị...)"
+                      placeholder="AI addresses user (e.g. You...)"
                       className={cn(
                         "h-8 px-2.5 rounded-lg border text-xs focus:outline-none",
                         isEditorial ? "bg-white border-[#ded7ca] text-[#1e1d1b]" : "bg-[#080b11] border-white/[0.1] text-white"
@@ -525,7 +525,7 @@ export default function AIIdentityModal({
 
                 {/* Tone & Disposition */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold block">Phong cách & Giọng điệu (Tone & Mindset)</label>
+                  <label className="text-xs font-semibold block">Tone & Reasoning Mindset</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {TONE_OPTIONS.map((t) => {
                       const isToneActive = form.tone === t.id;
@@ -555,12 +555,12 @@ export default function AIIdentityModal({
 
                 {/* Domain Focus */}
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold block">Lĩnh vực Chuyên môn Trọng tâm</label>
+                  <label className="text-xs font-semibold block">Primary Domain Expertise</label>
                   <input 
                     type="text"
                     value={form.domain}
                     onChange={(e) => setForm({ ...form, domain: e.target.value })}
-                    placeholder="VD: Kỹ thuật phần mềm, Nghiên cứu học thuật, Chiến lược kinh doanh..."
+                    placeholder="e.g. Software Architecture, Academic Research, Strategic Finance..."
                     className={cn(
                       "w-full h-8.5 px-3 rounded-lg border text-xs focus:outline-none",
                       isEditorial ? "bg-white border-[#ded7ca] text-[#1e1d1b]" : "bg-[#080b11] border-white/[0.1] text-white"
@@ -570,12 +570,12 @@ export default function AIIdentityModal({
 
                 {/* Bio / Operating Motto */}
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold block">Phương châm Hoạt động / Giới thiệu Ngắn</label>
+                  <label className="text-xs font-semibold block">Operating Motto / Bio</label>
                   <input 
                     type="text"
                     value={form.bio}
                     onChange={(e) => setForm({ ...form, bio: e.target.value })}
-                    placeholder="VD: Kiên định bảo vệ chân lý khách quan, tư duy từ nguyên lý đầu tiên..."
+                    placeholder="e.g. Grounded in first principles, objective truth, and cognitive rigor..."
                     className={cn(
                       "w-full h-8.5 px-3 rounded-lg border text-xs focus:outline-none",
                       isEditorial ? "bg-white border-[#ded7ca] text-[#1e1d1b]" : "bg-[#080b11] border-white/[0.1] text-white"
@@ -585,12 +585,12 @@ export default function AIIdentityModal({
 
                 {/* Custom Directives */}
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold block">Chỉ thị Định danh Bắt buộc (Custom Identity Directives)</label>
+                  <label className="text-xs font-semibold block">Mandatory Directives (Custom System Rules)</label>
                   <textarea 
                     rows={3}
                     value={form.customDirectives || ''}
                     onChange={(e) => setForm({ ...form, customDirectives: e.target.value })}
-                    placeholder="Các quy tắc bắt buộc AI phải tuân thủ trong mọi câu trả lời..."
+                    placeholder="Rules the AI must adhere to across all turns..."
                     className={cn(
                       "w-full p-2.5 rounded-lg border text-xs focus:outline-none font-mono resize-none leading-relaxed",
                       isEditorial ? "bg-white border-[#ded7ca] text-[#1e1d1b]" : "bg-[#080b11] border-white/[0.1] text-slate-200"
@@ -615,7 +615,7 @@ export default function AIIdentityModal({
               )}
             >
               <RotateCcw size={12} />
-              <span>Mặc định</span>
+              <span>Reset Default</span>
             </button>
 
             <div className="flex items-center gap-2">
@@ -627,7 +627,7 @@ export default function AIIdentityModal({
                   isEditorial ? "hover:bg-black/[0.05] text-[#706a61]" : "hover:bg-white/10 text-slate-300"
                 )}
               >
-                Hủy
+                Cancel
               </button>
 
               <button
@@ -645,12 +645,12 @@ export default function AIIdentityModal({
                 {saveSuccess ? (
                   <>
                     <Check size={13} />
-                    <span>Đã lưu!</span>
+                    <span>Saved!</span>
                   </>
                 ) : (
                   <>
                     <Bot size={13} />
-                    <span>Lưu Định danh AI</span>
+                    <span>Save Identity</span>
                   </>
                 )}
               </button>

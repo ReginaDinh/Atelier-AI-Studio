@@ -66,9 +66,9 @@ export default function AnalyticsDashboard({
   return (
     <div className="flex-1 flex flex-col h-full bg-[#07080a] text-slate-100 overflow-y-auto">
       {/* Top Bar */}
-      <div className="h-14 px-6 border-b border-[#1b1f29] bg-[#0c0e12]/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+      <div className="min-h-14 py-2 px-3 sm:px-6 border-b border-[#1b1f29] bg-[#0c0e12]/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
             <BarChart3 size={16} />
           </div>
           <div>
@@ -82,11 +82,11 @@ export default function AnalyticsDashboard({
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center p-0.5 bg-[#12151c] border border-[#212633] rounded-lg">
             <button
               onClick={() => setScope('current')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 scope === 'current'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -96,7 +96,7 @@ export default function AnalyticsDashboard({
             </button>
             <button
               onClick={() => setScope('all')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                 scope === 'all'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -121,13 +121,13 @@ export default function AnalyticsDashboard({
             title="Export JSON"
           >
             <Download size={12} />
-            <span>Export</span>
+            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>
 
       {/* Main Grid */}
-      <div className="p-6 max-w-7xl mx-auto w-full space-y-5">
+      <div className="p-3 sm:p-6 max-w-7xl mx-auto w-full space-y-4 sm:space-y-5">
         {/* Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           <div className="p-4 rounded-xl border border-[#1b1f29] bg-[#0d0f14]">

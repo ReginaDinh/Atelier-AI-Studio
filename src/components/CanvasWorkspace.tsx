@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katex from 'katex';
@@ -39,7 +40,7 @@ export const LATEX_TEMPLATES: {
   {
     id: 'ieee_q1',
     label: 'IEEE / ACM Q1 Paper',
-    desc: 'Chuẩn bài báo hội nghị / tạp chí Q1 (Abstract, IMRaD, Equations, Theorem, Bibliography)',
+    desc: 'Standard Q1 conference/journal paper format (Abstract, IMRaD, Equations, Theorem, Bibliography)',
     code: [
       '\\documentclass[conference]{IEEEtran}',
       '\\usepackage{amsmath,amssymb,amsfonts}',
@@ -112,7 +113,7 @@ export const LATEX_TEMPLATES: {
   {
     id: 'nature_imrad',
     label: 'Nature / Springer IMRaD',
-    desc: 'Bố cục bài báo thực nghiệm khoa học tự nhiên & y sinh (Introduction, Results, Discussion, Methods)',
+    desc: 'Empirical structure for natural & biomedical sciences (Introduction, Results, Discussion, Methods)',
     code: [
       '\\documentclass[11pt]{article}',
       '\\usepackage{amsmath,amssymb}',
@@ -151,8 +152,8 @@ export const LATEX_TEMPLATES: {
   },
   {
     id: 'math_proof',
-    label: 'Toán học & Chứng minh Định lý',
-    desc: 'Bản thảo chuyên sâu Toán lý thuyết, Ma trận, Định lý (Theorem / Lemma / Proof)',
+    label: 'Pure Math & Theorem Proving',
+    desc: 'Advanced manuscript for pure math, matrices, theorems, and proofs',
     code: [
       '\\documentclass{amsart}',
       '\\usepackage{amsmath,amssymb,amsthm}',
@@ -214,7 +215,7 @@ const LATEX_SNIPPETS: { label: string; insert: string }[] = [
   {
     label: '+ Theorem & Proof',
     insert:
-      '\n\\begin{theorem}[Tên Định lý]\n  Cho không gian metric đầy đủ $(X, d)$ và ánh xạ co $T: X \\to X$. Khi đó tồn tại duy nhất điểm bất động $x^* \\in X$ sao cho $T(x^*) = x^*$.\n\\end{theorem}\n\\begin{proof}\n  Xây dựng dãy lặp Picard $x_{n+1} = T(x_n)$ và kiểm chứng điều kiện Cauchy.\n\\end{proof}\n',
+      '\n\\begin{theorem}[Theorem Name]\n  Let $(X, d)$ be a complete metric space and $T: X \\to X$ a contraction mapping. Then there exists a unique fixed point $x^* \\in X$ such that $T(x^*) = x^*$.\n\\end{theorem}\n\\begin{proof}\n  Construct the Picard iteration sequence $x_{n+1} = T(x_n)$ and verify the Cauchy condition.\n\\end{proof}\n',
   },
   {
     label: '+ Citation',
@@ -896,45 +897,45 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   const quickActions = isLatexMode
     ? [
         {
-          label: 'Chuẩn hóa Q1 (IEEE/ACM)',
+          label: 'Format Q1 (IEEE/ACM)',
           instr:
-            'Chỉnh sửa và nâng cấp bản thảo thành bài báo khoa học chuẩn Q1 (IEEE/ACM) hoàn chỉnh với \\title, \\begin{abstract}, \\section, định lý toán học và \\begin{thebibliography}.',
+            'Format and upgrade manuscript into a publication-grade Q1 paper (IEEE/ACM) with title, abstract, sections, mathematical rigor, and bibliography.',
         },
         {
-          label: 'Bổ sung Công thức & Định lý',
+          label: 'Add Formulas & Theorems',
           instr:
-            'Bổ sung công thức toán học chặt chẽ (\\begin{equation}, \\begin{align}) kèm \\begin{theorem} và \\begin{proof} minh họa cho lập luận chính.',
+            'Add rigorous mathematical formulations (\begin{equation}, \begin{align}) with \begin{theorem} and \begin{proof} blocks.',
         },
         {
-          label: 'Kiểm định Cú pháp LaTeX',
+          label: 'Verify LaTeX Syntax',
           instr:
-            'Kiểm tra và sửa toàn bộ lỗi cú pháp LaTeX, dấu ngoặc nhọn, môi trường toán học và trích dẫn \\cite{} để đảm bảo biên dịch chuẩn.',
+            'Inspect and fix LaTeX syntax errors, braces, math environments, and citations.',
         },
         {
-          label: 'Dịch Học thuật (Academic EN)',
+          label: 'Academic Polish (EN)',
           instr:
-            'Chuyển ngữ hoặc chuốt lại toàn bộ văn phong sang tiếng Anh học thuật (Academic English) chuẩn tạp chí Nature / IEEE nhưng giữ nguyên cấu trúc lệnh LaTeX.',
+            'Refine text into high-impact academic English suitable for Nature/IEEE while preserving LaTeX macros.',
         },
       ]
     : [
         {
-          label: 'Súc tích hơn',
+          label: 'Make Concise',
           instr:
-            'Viết lại súc tích, cô đọng và sắc bén hơn nhưng giữ nguyên thông tin cốt lõi.',
+            'Rewrite concisely while retaining all critical technical findings.',
         },
         {
-          label: 'Đào sâu kỹ thuật',
+          label: 'Deepen Technical Details',
           instr:
-            'Mở rộng phân tích chuyên sâu hơn, bổ sung dẫn chứng kỹ thuật và ví dụ cụ thể.',
+            'Expand technical depth with concrete derivations, benchmarks, and proofs.',
         },
         {
-          label: 'Chuyển sang Bài báo LaTeX',
+          label: 'Convert to LaTeX Paper',
           instr:
-            'Chuyển đổi toàn bộ nội dung này thành một bản thảo bài báo khoa học LaTeX (.tex) hoàn chỉnh có \\documentclass, \\title, \\begin{abstract}, các \\section, phương trình toán học và \\begin{thebibliography}.',
+            'Convert full content into a structured LaTeX (.tex) paper with documentclass, title, abstract, sections, equations, and bibliography.',
         },
         {
-          label: 'Sơ đồ Mermaid',
-          instr: 'Bổ sung hoặc chuyển đổi cấu trúc sang sơ đồ Mermaid trực quan.',
+          label: 'Mermaid Diagram',
+          instr: 'Add or convert architecture into an interactive Mermaid diagram.',
         },
       ];
 
@@ -1034,7 +1035,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 140 }}
           className={cn(
-            'flex flex-col h-full relative z-30 shadow-2xl transition-all',
+            'flex flex-col h-full max-lg:fixed max-lg:inset-0 max-lg:!w-full max-lg:z-50 lg:relative lg:z-30 shadow-2xl transition-all',
             isEditorial
               ? 'border-l border-[#ded7ca] bg-[#fcfaf7] text-[#1e1d1b]'
               : isMidnight
@@ -1046,7 +1047,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           {/* Workspace Header */}
           <div
             className={cn(
-              'h-13 flex items-center justify-between px-4 border-b transition-colors gap-2',
+              'min-h-13 py-1.5 flex flex-wrap items-center justify-between px-3 sm:px-4 border-b transition-colors gap-2',
               isEditorial
                 ? 'bg-[#f5efe4] border-[#ded7ca]'
                 : isMidnight
@@ -1116,7 +1117,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                             ? 'bg-white border-[#d8d0c2] text-[#5c5549] hover:border-amber-500'
                             : 'bg-white/5 border-white/10 text-slate-300 hover:border-sky-400'
                         )}
-                        title="Chuyển đổi chế độ hiển thị giữa LaTeX Paper và Markdown"
+                        title="Toggle view between LaTeX Paper and Markdown"
                       >
                         {isLatexMode ? '→ Markdown' : '→ LaTeX Studio'}
                       </button>
@@ -1134,8 +1135,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                 )}
               >
                 {[
-                  { id: 'preview', label: isLatexMode ? 'Bản in Paper' : 'Preview' },
-                  { id: 'canvas', label: isLatexMode ? 'Soạn .tex' : 'Edit' },
+                  { id: 'preview', label: isLatexMode ? 'Typeset Paper' : 'Preview' },
+                  { id: 'canvas', label: isLatexMode ? 'Source (.tex)' : 'Edit' },
                   { id: 'code', label: 'Raw' },
                 ].map((t) => (
                   <button
@@ -1172,7 +1173,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                         ? 'text-[#7a7368] hover:text-[#1e1d1b]'
                         : 'text-[#7a8190] hover:text-white'
                     )}
-                    title="Chế độ Song song (Soạn thảo mã LaTeX + Xem trực tiếp bài báo như Overleaf)"
+                    title="Split View (Source + Live Typeset Paper)"
                   >
                     <SplitSquareVertical size={12} className="shrink-0 rotate-90" />
                     <span className="hidden sm:inline">Split</span>
@@ -1191,10 +1192,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       ? 'bg-white hover:bg-amber-50 border-[#d6cfc2] text-[#2b2620]'
                       : 'bg-white/[0.06] hover:bg-white/[0.12] border-white/10 text-slate-200'
                   )}
-                  title="Xuất bài báo / tài liệu ra PDF, Word (.doc), LaTeX (.tex) hoặc HTML"
+                  title="Export document to PDF, Word (.doc), LaTeX (.tex), or HTML"
                 >
                   <FileDown size={13} className={isEditorial ? 'text-amber-800' : 'text-sky-400'} />
-                  <span className="hidden sm:inline">Xuất file</span>
+                  <span className="hidden sm:inline">Export</span>
                   <ChevronDown size={11} className="opacity-60" />
                 </button>
 
@@ -1212,7 +1213,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       )}
                     >
                       <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider opacity-60 border-b border-current/10">
-                        Định dạng xuất bản
+                        Export Formats
                       </div>
                       <button
                         type="button"
@@ -1224,7 +1225,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       >
                         <span className="flex items-center gap-2 font-medium">
                           <Printer size={13} className="text-rose-500 shrink-0" />
-                          <span>Xuất PDF (Chuẩn in A4)</span>
+                          <span>Export PDF (Print A4)</span>
                         </span>
                         <span className="text-[10px] font-mono opacity-60">.pdf</span>
                       </button>
@@ -1239,7 +1240,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       >
                         <span className="flex items-center gap-2 font-medium">
                           <FileText size={13} className="text-blue-500 shrink-0" />
-                          <span>Xuất Microsoft Word</span>
+                          <span>Export Microsoft Word</span>
                         </span>
                         <span className="text-[10px] font-mono opacity-60">.doc</span>
                       </button>
@@ -1254,7 +1255,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       >
                         <span className="flex items-center gap-2 font-medium">
                           <Download size={13} className="text-emerald-500 shrink-0" />
-                          <span>{isLatexMode ? 'Mã nguồn LaTeX (Overleaf)' : 'Tải mã nguồn gốc'}</span>
+                          <span>{isLatexMode ? 'LaTeX Source (.tex)' : 'Download Source'}</span>
                         </span>
                         <span className="text-[10px] font-mono opacity-60">
                           {isLatexMode ? '.tex' : `.${activeArtifact.type === 'markdown' ? 'md' : activeArtifact.type}`}
@@ -1271,7 +1272,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       >
                         <span className="flex items-center gap-2 font-medium">
                           <Code2 size={13} className="text-purple-500 shrink-0" />
-                          <span>Trang Web độc lập (KaTeX)</span>
+                          <span>Standalone Web Page (KaTeX)</span>
                         </span>
                         <span className="text-[10px] font-mono opacity-60">.html</span>
                       </button>
@@ -1289,7 +1290,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       ? 'hover:bg-black/[0.05] text-[#7a7368] hover:text-[#1e1d1b]'
                       : 'hover:bg-white/[0.06] text-[#7a8190] hover:text-white'
                   )}
-                  title="Hoàn tác chỉnh sửa trước"
+                  title="Undo previous edit"
                 >
                   <RotateCcw size={13} className="shrink-0" />
                 </button>
@@ -1303,7 +1304,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                     ? 'hover:bg-black/[0.05] text-[#7a7368] hover:text-[#1e1d1b]'
                     : 'hover:bg-white/[0.06] text-[#7a8190] hover:text-white'
                 )}
-                title={isExpanded ? 'Thu nhỏ' : 'Toàn màn hình'}
+                title={isExpanded ? 'Collapse' : 'Fullscreen'}
               >
                 {isExpanded ? (
                   <Minimize2 size={13} className="shrink-0" />
@@ -1320,7 +1321,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                     ? 'hover:bg-black/[0.05] text-[#7a7368] hover:text-[#1e1d1b]'
                     : 'hover:bg-white/[0.06] text-[#7a8190] hover:text-white'
                 )}
-                title="Đóng"
+                title="Close"
               >
                 <X size={13} className="shrink-0" />
               </button>
@@ -1341,7 +1342,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
             >
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-mono text-[10px] uppercase opacity-70 flex items-center gap-1">
-                  <BookOpen size={11} /> Mẫu Paper:
+                  <BookOpen size={11} /> Paper Templates:
                 </span>
                 {LATEX_TEMPLATES.map((tpl) => (
                   <button
@@ -1375,10 +1376,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       ? 'bg-white border-[#d6cfc2] text-[#3f3a32]'
                       : 'bg-white/5 border-white/10 text-slate-300'
                   )}
-                  title="Chuyển đổi bố cục 1 cột (Preprint) hoặc 2 cột (IEEE/ACM Journal)"
+                  title="Switch 1 column (arXiv) or 2 columns (IEEE/ACM)"
                 >
                   {paperColumns === 2 ? <Columns2 size={11} /> : <FileText size={11} />}
-                  <span>{paperColumns === 2 ? '2 Cột (IEEE)' : '1 Cột (arXiv)'}</span>
+                  <span>{paperColumns === 2 ? '2 Columns (IEEE)' : '1 Column (arXiv)'}</span>
                 </button>
               </div>
             </div>
@@ -1403,7 +1404,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                     type="button"
                     disabled={isCanvasEditing}
                     onClick={() => {
-                      if (act.label === 'Chuyển sang Bài báo LaTeX' && onChangeArtifactType) {
+                      if (act.label === 'Convert to LaTeX Paper' && onChangeArtifactType) {
                         onChangeArtifactType('latex');
                       }
                       onRunAIEdit(act.instr);
@@ -1432,7 +1433,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                   )}
                 >
                   <Check size={11} className="shrink-0" />
-                  <span>Đồng bộ vào Chat</span>
+                  <span>Sync to Chat</span>
                 </button>
               )}
             </div>
@@ -1445,8 +1446,8 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                 onKeyDown={(e) => e.key === 'Enter' && onRunAIEdit()}
                 placeholder={
                   isLatexMode
-                    ? 'Yêu cầu AI viết thêm mục Methodology, chứng minh định lý, thêm bảng BibTeX...'
-                    : 'Yêu cầu AI biến đổi nội dung trên Canvas...'
+                    ? 'Ask AI to expand methodology, formalize proofs, add BibTeX...'
+                    : 'Ask AI to transform canvas content...'
                 }
                 className={cn(
                   'flex-1 h-8 border rounded-lg px-2.5 text-xs focus:outline-none leading-none',
@@ -1469,7 +1470,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                 ) : (
                   <Wand2 size={12} className="shrink-0" />
                 )}
-                <span>Biến đổi</span>
+                <span>Transform</span>
               </button>
             </div>
           </div>
@@ -1512,7 +1513,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                         ? 'bg-white border-[#ded7ca] text-[#1e1d1b] focus:border-amber-500/60'
                         : 'bg-[#06070b] border-white/[0.07] text-emerald-100 focus:border-emerald-500/40'
                     )}
-                    placeholder="Nhập mã nguồn LaTeX (.tex)..."
+                    placeholder="Enter LaTeX source code (.tex)..."
                   />
                 </div>
                 <div className="h-full overflow-y-auto p-4 sm:p-6 bg-[#ebe7df]/60">
@@ -1524,15 +1525,12 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                 {isLatexMode ? (
                   renderPaperSheet()
                 ) : activeArtifact.type === 'mermaid' ? (
-                  <div
-                    className={cn(
-                      'w-full h-full rounded-xl border overflow-hidden',
-                      isEditorial
-                        ? 'border-[#ded7ca] bg-white'
-                        : 'border-white/[0.07] bg-[#0c0f17]'
-                    )}
-                  >
-                    <MermaidRenderer code={activeArtifact.code} />
+                  <div className="w-full h-full overflow-hidden">
+                    <MermaidRenderer
+                      code={activeArtifact.code}
+                      isEditorial={isEditorial}
+                      className="h-full"
+                    />
                   </div>
                 ) : activeArtifact.type === 'html' ? (
                   <div className="w-full h-full rounded-xl border border-white/[0.07] bg-white overflow-hidden relative shadow-sm">
@@ -1545,7 +1543,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                           <meta name="viewport" content="width=device-width, initial-scale=1">
                           <script src="https://cdn.tailwindcss.com"></script>
                           <style>
-                            body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
+                            body { font-family: 'Google Sans Text', 'Google Sans', system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
                           </style>
                         </head>
                         <body class="bg-[#fafafa] text-[#1a1a1a]">
@@ -1579,7 +1577,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       isEditorial ? 'prose prose-neutral text-[#2b2620]' : 'prose prose-invert'
                     )}
                   >
-                    <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
                       {activeArtifact.code}
                     </Markdown>
                   </div>
@@ -1589,7 +1587,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
               <div className="w-full h-full flex flex-col p-3 gap-2">
                 {isLatexMode && (
                   <div className="flex items-center gap-1 flex-wrap">
-                    <span className="text-[10px] font-mono opacity-60 mr-1">Chèn nhanh LaTeX:</span>
+                    <span className="text-[10px] font-mono opacity-60 mr-1">Insert snippet:</span>
                     {LATEX_SNIPPETS.map((snip, idx) => (
                       <button
                         key={idx}
@@ -1617,7 +1615,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                       ? 'bg-white border-[#ded7ca] text-[#1e1d1b] focus:border-amber-500/60'
                       : 'bg-[#06070b] border-white/[0.07] text-slate-100 focus:border-sky-500/40'
                   )}
-                  placeholder="Soạn thảo trực tiếp nội dung hoặc mã nguồn LaTeX (.tex)..."
+                  placeholder="Edit document content or LaTeX (.tex) source..."
                 />
               </div>
             ) : (
@@ -1643,10 +1641,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                   {isCopied ? (
                     <>
                       <Check size={11} className="text-emerald-500" />
-                      <span>Đã sao chép</span>
+                      <span>Copied</span>
                     </>
                   ) : (
-                    <span>Sao chép</span>
+                    <span>Copy</span>
                   )}
                 </button>
                 <pre className="whitespace-pre-wrap leading-relaxed pr-2 pt-4">
