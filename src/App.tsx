@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
 import {
   Plus, 
   MessageSquare, 
@@ -100,6 +100,8 @@ import {
 } from './services/geminiService';
 import CouncilDebateView from './components/CouncilDebateView';
 import DeepResearchTracker from './components/DeepResearchTracker';
+import MessageItem, { extractArtifacts } from './components/MessageItem';
+import Composer, { ComposerHandle } from './components/Composer';
 import ThemeGalleryModal, { THEMES_LIST } from './components/ThemeGalleryModal';
 import AIIdentityModal, { DEFAULT_AI_IDENTITY } from './components/AIIdentityModal';
 import PersonaManagerModal, { DEFAULT_PERSONAS } from './components/PersonaManagerModal';
@@ -117,6 +119,7 @@ import AtelierLogo from './components/AtelierLogo';
 import useBatchQueue from './hooks/useBatchQueue';
 import { VectorIcon } from './components/VectorIcon';
 import { PWAInstallButton, OfflineIndicator } from './components/PWAInstallButton';
+import { signInAnonymously } from 'firebase/auth';
 import {
   auth,
   onAuthStateChanged,
@@ -272,46 +275,6 @@ export const REASONING_EFFORT_OPTIONS: {
   },
 ];
 
-function extractArtifacts(content: string): { type: 'html' | 'svg' | 'mermaid' | 'latex'; code: string } | null {
-  // Check for LaTeX code block or full manuscript first
-  const latexFenceRegex = /```(?:latex|tex)\s*([\s\S]*?)```/i;
-  const latexMatch = latexFenceRegex.exec(content);
-  if (latexMatch) {
-    return { type: 'latex', code: latexMatch[1].trim() };
-  }
-  if (content.includes('\\documentclass') && content.includes('\\begin{document}')) {
-    return { type: 'latex', code: content.trim() };
-  }
-  // Check for Mermaid diagram / mindmap first
-  const mermaidRegex = /```(?:mermaid|mindmap)\s*([\s\S]*?)```/i;
-  const mermaidMatch = mermaidRegex.exec(content);
-  if (mermaidMatch) {
-    return { type: 'mermaid', code: mermaidMatch[1].trim() };
-  }
-
-  const htmlRegex = /```html\s*([\s\S]*?)```/;
-  const svgRegex = /```xml\s*(<svg[\s\S]*?<\/svg>)```|```svg\s*([\s\S]*?)```/;
-  
-  const htmlMatch = htmlRegex.exec(content);
-  if (htmlMatch) {
-    return { type: 'html', code: htmlMatch[1] };
-  }
-  
-  const svgMatch = svgRegex.exec(content);
-  if (svgMatch) {
-    return { type: 'svg', code: svgMatch[1] || svgMatch[2] };
-  }
-  
-  // Try raw svg as fallback
-  const rawSvgRegex = /(<svg[\s\S]*?<\/svg>)/;
-  const rawSvgMatch = rawSvgRegex.exec(content);
-  if (rawSvgMatch) {
-    return { type: 'svg', code: rawSvgMatch[1] };
-  }
-  
-  return null;
-}
-
 export default function App() {
   const [theme, setTheme] = useState<StudioTheme>(() => {
     const saved = localStorage.getItem('studio_theme');
@@ -385,6 +348,7 @@ export default function App() {
   }, [theme]);
 
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('chat_user_id'));
+  const [displayName, setDisplayName] = useState<string>('');
   const [tempUserId, setTempUserId] = useState('');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -411,28 +375,21 @@ export default function App() {
   }, [expandedFolderIds]);
 
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const composerRef = useRef<ComposerHandle | null>(null);
+  const setComposerInput = useCallback((val: React.SetStateAction<string>) => {
+    composerRef.current?.setInput(val);
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const isLoadingRef = useRef(false);
   useEffect(() => {
     isLoadingRef.current = isLoading;
   }, [isLoading]);
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Detect mobile phone / virtual keyboard to prevent accidental sends on Enter
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    const hasTouchScreen = (
-      'ontouchstart' in window ||
-      navigator.maxTouchPoints > 0 ||
-      // @ts-ignore
-      (navigator.msMaxTouchPoints && navigator.msMaxTouchPoints > 0)
-    );
-    const isMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isSmallScreen = window.innerWidth <= 768;
-    return hasTouchScreen || isMobileUserAgent || isSmallScreen;
-  };
 
   const handleStopExecution = () => {
     if (abortControllerRef.current) {
@@ -473,21 +430,26 @@ export default function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
 
+  const syncInFlightRef = useRef(false);
+
   const handleBidirectionalCloudSync = async (targetUserId?: string, silent = false) => {
+    if (firebaseUser?.isAnonymous) return;
+    if (syncInFlightRef.current) return;
     const resolvedUser = targetUserId || userId || localStorage.getItem('chat_user_id');
-    if (!resolvedUser || !auth.currentUser || isSyncingCloud) return;
+    if (!resolvedUser || !auth.currentUser) return;
+    syncInFlightRef.current = true;
     setIsSyncingCloud(true);
     try {
       const report = await reconcileBidirectionalCloudSync(resolvedUser);
       await Promise.all([fetchSessions(), fetchMemory()]);
-      if (currentSessionId) {
-        await fetchMessages(currentSessionId);
+      if (currentSessionIdRef.current) {
+        await fetchMessages(currentSessionIdRef.current);
       }
       const totalChanges =
         report.hydratedSessions + report.hydratedMemories + report.pushedSessions + report.pushedMemories;
       if (!silent || totalChanges > 0) {
         showFolderToast(
-          `2-way Cloud sync completed (`,
+          `2-way Cloud sync completed (${totalChanges} changes synced)`,
           'success'
         );
       }
@@ -497,6 +459,7 @@ export default function App() {
         showFolderToast('Cloud sync unavailable at the moment', 'info');
       }
     } finally {
+      syncInFlightRef.current = false;
       setIsSyncingCloud(false);
     }
   };
@@ -512,36 +475,37 @@ export default function App() {
       }
       if (fbUser) {
         const displayId = formatCompactUserName(fbUser.email || fbUser.uid, fbUser);
-        const existingLocalId = localStorage.getItem('chat_user_id');
-        const activeId = existingLocalId || displayId;
-        if (!existingLocalId) {
-          localStorage.setItem('chat_user_id', displayId);
-          setUserId(displayId);
+        setDisplayName((prev) => (fbUser.isAnonymous && prev ? prev : displayId));
+        localStorage.setItem('chat_user_id', fbUser.uid);
+        setUserId(fbUser.uid);
+        if (!fbUser.isAnonymous) {
+          unsubRecords = subscribeToBioscienceRecords(fbUser.uid, (records) => {
+            setSavedBioscienceRecords(records);
+          });
+          setIsSyncingCloud(true);
+          reconcileBidirectionalCloudSync(fbUser.uid)
+            .then(async (report) => {
+              if (report.hydratedSessions > 0 || report.hydratedMessages > 0 || report.hydratedMemories > 0) {
+                const [sessRes, memRes] = await Promise.all([
+                  fetch(`/api/sessions?userId=${encodeURIComponent(fbUser.uid)}`),
+                  fetch(`/api/memory?userId=${encodeURIComponent(fbUser.uid)}`),
+                ]);
+                if (sessRes.ok) {
+                  const sessData = await sessRes.json().catch(() => null);
+                  if (Array.isArray(sessData)) setSessions(sessData);
+                }
+                if (memRes.ok) {
+                  const memData = await memRes.json().catch(() => null);
+                  if (Array.isArray(memData)) setMemory(memData);
+                }
+              }
+            })
+            .catch((e) => console.warn('Initial background cloud sync skipped:', e))
+            .finally(() => setIsSyncingCloud(false));
         }
-        unsubRecords = subscribeToBioscienceRecords(fbUser.uid, (records) => {
-          setSavedBioscienceRecords(records);
-        });
-        setIsSyncingCloud(true);
-        reconcileBidirectionalCloudSync(activeId)
-          .then(async (report) => {
-            if (report.hydratedSessions > 0 || report.hydratedMessages > 0 || report.hydratedMemories > 0) {
-              const [sessRes, memRes] = await Promise.all([
-                fetch(`/api/sessions?userId=${encodeURIComponent(activeId)}`),
-                fetch(`/api/memory?userId=${encodeURIComponent(activeId)}`),
-              ]);
-              if (sessRes.ok) {
-                const sessData = await sessRes.json().catch(() => null);
-                if (Array.isArray(sessData)) setSessions(sessData);
-              }
-              if (memRes.ok) {
-                const memData = await memRes.json().catch(() => null);
-                if (Array.isArray(memData)) setMemory(memData);
-              }
-            }
-          })
-          .catch((e) => console.warn('Initial background cloud sync skipped:', e))
-          .finally(() => setIsSyncingCloud(false));
       } else {
+        setUserId(null);
+        setDisplayName('');
         setSavedBioscienceRecords([]);
       }
     });
@@ -769,6 +733,9 @@ export default function App() {
       skipNextFetchRef.current = false;
       return;
     }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     if (currentSessionId && userId) {
       fetchMessages(currentSessionId);
     } else {
@@ -778,8 +745,13 @@ export default function App() {
 
   useEffect(() => {
     const scrollContainer = messagesEndRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
-    if (!scrollContainer || scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 150) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (
+      !scrollContainer ||
+      scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight <= 120
+    ) {
+      messagesEndRef.current?.scrollIntoView(
+        isLoadingRef.current ? undefined : { behavior: 'smooth' }
+      );
     }
   }, [messages]);
 
@@ -839,7 +811,7 @@ export default function App() {
           }
         }
         if (finalTranscript) {
-          setInput(prev => prev + ' ' + finalTranscript);
+          composerRef.current?.setInput(prev => prev + ' ' + finalTranscript);
         }
       };
 
@@ -865,7 +837,14 @@ export default function App() {
 
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  const handleCopyMessage = async (idKey: string, text: string, label = 'Copied message to clipboard') => {
+  const showFolderToast = useCallback((message: string, type: 'success' | 'info' = 'success') => {
+    setFolderToast({ message, type });
+    setTimeout(() => {
+      setFolderToast(null);
+    }, 3200);
+  }, []);
+
+  const handleCopyMessage = useCallback(async (idKey: string, text: string, label = 'Copied message to clipboard') => {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -884,7 +863,7 @@ export default function App() {
     setTimeout(() => {
       setCopiedMessageId((prev) => (prev === idKey ? null : prev));
     }, 2000);
-  };
+  }, [showFolderToast]);
 
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) return;
@@ -933,7 +912,7 @@ export default function App() {
     const data = await safeFetchJson<Session[]>(`/api/sessions?userId=${encodeURIComponent(userId)}`, undefined, []);
     if (Array.isArray(data)) {
       setSessions(data);
-      if (data.length > 0 && !currentSessionId) {
+      if (data.length > 0 && !currentSessionIdRef.current) {
         setCurrentSessionId(data[0].id);
       }
     }
@@ -980,7 +959,7 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, key: k, value: v })
     });
-    if (auth.currentUser) {
+    if (auth.currentUser && !firebaseUser?.isAnonymous) {
       saveMemoryToFirestore({ key: k, value: v }).catch(console.error);
     }
     setNewMemoryKey('');
@@ -989,9 +968,9 @@ export default function App() {
     showFolderToast(`Saved to AI Memory: ${k}`, 'success');
   };
 
-  const deleteMemory = async (id: number, key?: string) => {
+  const deleteMemory = async (id: number, key: string) => {
     await fetch(`/api/memory/${id}`, { method: 'DELETE' });
-    if (auth.currentUser && key) {
+    if (auth.currentUser && !firebaseUser?.isAnonymous && key) {
       deleteMemoryFromFirestore(key).catch(console.error);
     }
     fetchMemory();
@@ -1069,7 +1048,7 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId, key: mem.key, value: mem.value })
           });
-          if (auth.currentUser) {
+          if (auth.currentUser && !firebaseUser?.isAnonymous) {
             saveMemoryToFirestore({ key: mem.key, value: mem.value }).catch(console.error);
           }
           addedMemCount++;
@@ -1118,7 +1097,10 @@ export default function App() {
   const [isPinnedInsightsCollapsed, setIsPinnedInsightsCollapsed] = useState(false);
   const [copiedPinnedInsights, setCopiedPinnedInsights] = useState(false);
 
-  const togglePinDeepResearchInsights = (msgIndex: number) => {
+  const quickSaveNoteRef = useRef(quickSaveNoteFromMessage);
+  quickSaveNoteRef.current = quickSaveNoteFromMessage;
+
+  const togglePinDeepResearchInsights = useCallback((msgIndex: number) => {
     setMessages((prev) =>
       prev.map((msg, idx) => {
         if (idx !== msgIndex || !msg.deepResearch) return msg;
@@ -1132,9 +1114,9 @@ export default function App() {
         };
       })
     );
-  };
+  }, []);
 
-  const saveStrategicConclusionsToNote = (
+  const saveStrategicConclusionsToNote = useCallback((
     topic: string,
     conclusions: KeyInsightConclusion[]
   ) => {
@@ -1146,8 +1128,8 @@ export default function App() {
           }`
       )
       .join('\n\n')}`;
-    quickSaveNoteFromMessage(mdContent, `[Key Insights] ${topic.slice(0, 56)}`);
-  };
+    quickSaveNoteRef.current(mdContent, `[Key Insights] ${topic.slice(0, 56)}`);
+  }, []);
 
   const batchQueue = useBatchQueue({
     userId,
@@ -1176,37 +1158,17 @@ export default function App() {
     onNotify: (msg, type) => showFolderToast(msg, type || 'info')
   });
 
-  const enhanceUserPrompt = async () => {
-    if (!input.trim() || isEnhancing) return;
-    setIsEnhancing(true);
-    try {
-      const template = `Optimize the following user prompt for maximum clarity, analytical precision, and structured depth. Return ONLY the improved prompt text directly with zero filler:\n\n"${input}"`;
-
-      const response = await getGeminiResponse(
-        [{ role: 'user', content: template }],
-        { ...settings, systemInstruction: "You are an expert prompt engineer. Return only the optimized prompt with zero filler." },
-        []
-      );
-
-      if (response && response.trim()) {
-        setInput(response.trim());
-      }
-    } catch (e) {
-      console.error("Prompt optimization error:", e);
-    } finally {
-      setIsEnhancing(false);
-    }
-  };
-
-  const attachContextItem = (item: { id: number; type: 'document' | 'note'; title: string; content: string }) => {
-    if (attachedContexts.some(c => c.id === item.id && c.type === item.type)) return;
-    setAttachedContexts(prev => [...prev, item]);
+  const attachContextItem = useCallback((item: { id: number; type: 'document' | 'note'; title: string; content: string }) => {
+    setAttachedContexts(prev => {
+      if (prev.some(c => c.id === item.id && c.type === item.type)) return prev;
+      return [...prev, item];
+    });
     setIsAttachMenuOpen(false);
-  };
+  }, []);
 
-  const removeContextItem = (id: number, type: 'document' | 'note') => {
+  const removeContextItem = useCallback((id: number, type: 'document' | 'note') => {
     setAttachedContexts(prev => prev.filter(c => !(c.id === id && c.type === type)));
-  };
+  }, []);
 
   const selectPersona = (p: Persona, silent = false) => {
     setActivePersonaId(p.id);
@@ -1265,25 +1227,22 @@ export default function App() {
     selectPersona(current);
   };
 
+  const fetchSeqRef = useRef(0);
+
   const fetchMessages = async (id: string) => {
     if (!id) {
       setMessages([]);
       return;
     }
+    const seq = ++fetchSeqRef.current;
     const data = await safeFetchJson<Message[]>(`/api/messages?sessionId=${encodeURIComponent(id)}`, undefined, []);
+    if (seq !== fetchSeqRef.current || id !== currentSessionIdRef.current) return;
     if (Array.isArray(data)) {
       setMessages(prev => {
         const same = prev.length === data.length && prev.every((m, i) => m.id === data[i].id && m.content === data[i].content);
         return same ? prev : data;
       });
     }
-  };
-
-  const showFolderToast = (message: string, type: 'success' | 'info' = 'success') => {
-    setFolderToast({ message, type });
-    setTimeout(() => {
-      setFolderToast(null);
-    }, 3200);
   };
 
   const handleSaveFolder = async (folderData: { id?: string; name: string; emoji: string; color: string }) => {
@@ -1331,7 +1290,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder_id: folderId })
       });
-      if (auth.currentUser && targetSession) {
+      if (auth.currentUser && !firebaseUser?.isAnonymous && targetSession) {
         saveSessionToFirestore({
           id: sessionId,
           name: targetSession.name,
@@ -1427,7 +1386,7 @@ export default function App() {
             });
 
             const targetSession = uncategorizedSessions.find(s => s.id === assignment.sessionId);
-            if (auth.currentUser && targetSession) {
+            if (auth.currentUser && !firebaseUser?.isAnonymous && targetSession) {
               saveSessionToFirestore({
                 id: targetSession.id,
                 name: targetSession.name,
@@ -1505,7 +1464,7 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, name, userId, folder_id: targetFolderId })
     });
-    if (auth.currentUser) {
+    if (auth.currentUser && !firebaseUser?.isAnonymous) {
       saveSessionToFirestore({ id, name, folderId: targetFolderId, isPinned: false }).catch(console.error);
     }
     await fetchSessions();
@@ -1519,7 +1478,7 @@ export default function App() {
   const deleteSession = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    if (auth.currentUser) {
+    if (auth.currentUser && !firebaseUser?.isAnonymous) {
       deleteSessionFromFirestore(id).catch(console.error);
     }
     await fetchSessions();
@@ -1549,7 +1508,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_pinned: newPinned })
       });
-      if (auth.currentUser) {
+      if (auth.currentUser && !firebaseUser?.isAnonymous) {
         saveSessionToFirestore({
           id: session.id,
           name: session.name,
@@ -1585,7 +1544,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed })
       });
-      if (auth.currentUser && current) {
+      if (auth.currentUser && !firebaseUser?.isAnonymous && current) {
         saveSessionToFirestore({
           id: sessionId,
           name: trimmed,
@@ -1739,9 +1698,22 @@ export default function App() {
     }
   };
 
-  const handleForkSession = async (upToIndex: number) => {
-    if (!userId || !currentSessionId) return;
-    const currentSession = sessions.find((s) => s.id === currentSessionId);
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const reflexionLoadingIndexRef = useRef(reflexionLoadingIndex);
+  reflexionLoadingIndexRef.current = reflexionLoadingIndex;
+  const fetchSessionsRef = useRef(fetchSessions);
+  fetchSessionsRef.current = fetchSessions;
+
+  const handleForkSession = useCallback(async (upToIndex: number) => {
+    const uid = userIdRef.current;
+    const activeSid = currentSessionIdRef.current;
+    if (!uid || !activeSid) return;
+    const currentSession = sessionsRef.current.find((s) => s.id === activeSid);
     const newSessionId = crypto.randomUUID();
     const branchName = `Branch: ${(currentSession?.name || 'Chat').slice(0, 18)} (#${upToIndex + 1})`;
 
@@ -1750,26 +1722,61 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceSessionId: currentSessionId,
+          sourceSessionId: activeSid,
           newSessionId,
           name: branchName,
-          userId,
+          userId: uid,
           upToIndex
         })
       });
-      await fetchSessions();
+      await fetchSessionsRef.current();
       setCurrentSessionId(newSessionId);
     } catch (err) {
       console.error('Failed to fork session:', err);
     }
-  };
+  }, []);
 
-  const openInCanvas = (item: ArtifactItem) => {
+  const openInCanvas = useCallback((item: ArtifactItem) => {
     setActiveArtifact(item);
     setCanvasHistory([item.code]);
     setWorkspaceTab(item.type === 'latex' ? 'preview' : 'canvas');
     setIsWorkspaceOpen(true);
-  };
+  }, []);
+
+  const handleOpenMermaidInCanvas = useCallback((rawCode: string, messageIndex: number) => {
+    setActiveArtifact({
+      type: 'mermaid',
+      code: rawCode,
+      title: `Diagram #${messageIndex + 1}`,
+      messageIndex,
+    });
+    setCanvasHistory([rawCode]);
+    setWorkspaceTab('preview');
+    setIsWorkspaceOpen(true);
+  }, []);
+
+  const handleOpenExtractedArtifactInCanvas = useCallback(
+    (art: { type: 'html' | 'svg' | 'mermaid' | 'latex'; code: string }, messageIndex: number) => {
+      setActiveArtifact({
+        ...art,
+        title:
+          art.type === 'mermaid'
+            ? `Diagram #${messageIndex + 1}`
+            : art.type === 'latex'
+            ? `LaTeX #${messageIndex + 1}`
+            : `Preview #${messageIndex + 1}`,
+        messageIndex,
+      });
+      setCanvasHistory([art.code]);
+      setWorkspaceTab('preview');
+      setIsWorkspaceOpen(true);
+    },
+    []
+  );
+
+  const handleOpenEvolutionView = useCallback(() => {
+    setCurrentView('evolution');
+  }, []);
 
   const handleCanvasAIEdit = async (customInstruction?: string) => {
     const instr = (customInstruction || canvasInstruction).trim();
@@ -1821,16 +1828,13 @@ export default function App() {
     }
   };
 
-  const handleSend = async (customPrompt?: string) => {
-    const textToSend = customPrompt !== undefined ? customPrompt : input;
+  const handleSend = async (customPrompt = '') => {
+    const textToSend = customPrompt;
     if ((!textToSend.trim() && selectedImages.length === 0) || isLoading) return;
 
     const originalInput = textToSend;
     const attachedImages = selectedImages.length > 0 ? [...selectedImages] : undefined;
 
-    if (customPrompt === undefined) {
-      setInput('');
-    }
     setSelectedImages([]);
 
     // Check for Natural-Language Chat-to-Export (Word / PDF) and Chat-to-Note intent
@@ -1914,6 +1918,7 @@ export default function App() {
       }
 
       const userMessage: Message = {
+        clientId: crypto.randomUUID(),
         session_id: activeSessionId,
         role: 'user',
         content: originalInput,
@@ -1935,11 +1940,11 @@ export default function App() {
       setMessages(prev => {
         const newMsg = [...prev];
         if (newMsg[newMsg.length - 1] && dataUser?.id) {
-          newMsg[newMsg.length - 1].id = dataUser.id;
+          newMsg[newMsg.length - 1] = { ...newMsg[newMsg.length - 1], id: dataUser.id };
         }
         return newMsg;
       });
-      if (auth.currentUser && activeSessionId) {
+      if (auth.currentUser && !firebaseUser?.isAnonymous && activeSessionId) {
         const currentSess = sessions.find(s => s.id === activeSessionId);
         const resolvedName =
           currentSess && !/^(Chat \d+|New Chat)$/i.test(currentSess.name.trim())
@@ -1968,9 +1973,9 @@ export default function App() {
           if (userAnalysisRes && dataUser?.id) {
             setMessages(prev => {
               const updated = [...prev];
-              const target = updated.find(m => m.id === dataUser.id);
-              if (target) {
-                target.userAnalysis = userAnalysisRes;
+              const idx = updated.findIndex(m => m.id === dataUser.id);
+              if (idx >= 0) {
+                updated[idx] = { ...updated[idx], userAnalysis: userAnalysisRes };
               }
               return updated;
             });
@@ -2044,6 +2049,7 @@ export default function App() {
       let finalCouncilDebate: any = undefined;
 
       const aiMessage: Message = {
+        clientId: crypto.randomUUID(),
         session_id: activeSessionId,
         role: 'model',
         content: ''
@@ -2121,6 +2127,27 @@ export default function App() {
         if (streamRafId !== null) return;
         streamRafId = window.requestAnimationFrame(() => {
           streamRafId = null;
+          if (currentSessionIdRef.current === activeSessionId) {
+            const snapshot = aiResponseContent;
+            setMessages((prev) => {
+              if (prev.length === 0) return prev;
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content: snapshot,
+              };
+              return updated;
+            });
+          }
+        });
+      };
+
+      const flushStreamingNow = () => {
+        if (streamRafId !== null) {
+          window.cancelAnimationFrame(streamRafId);
+          streamRafId = null;
+        }
+        if (currentSessionIdRef.current === activeSessionId) {
           const snapshot = aiResponseContent;
           setMessages((prev) => {
             if (prev.length === 0) return prev;
@@ -2131,24 +2158,7 @@ export default function App() {
             };
             return updated;
           });
-        });
-      };
-
-      const flushStreamingNow = () => {
-        if (streamRafId !== null) {
-          window.cancelAnimationFrame(streamRafId);
-          streamRafId = null;
         }
-        const snapshot = aiResponseContent;
-        setMessages((prev) => {
-          if (prev.length === 0) return prev;
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            ...updated[updated.length - 1],
-            content: snapshot,
-          };
-          return updated;
-        });
       };
 
       // Branch 1: Multi-Agent Autonomous Deep Research Lab Active (Manual Toggle OR Auto-Detected Intent)
@@ -2223,14 +2233,16 @@ export default function App() {
             })
           });
           const dataAi = await resAi.json().catch(() => ({}));
-          if (dataAi?.id) {
+          if (dataAi?.id && currentSessionIdRef.current === activeSessionId) {
             setMessages(prev => {
               const newMsg = [...prev];
-              if (newMsg[newMsg.length - 1]) newMsg[newMsg.length - 1].id = dataAi.id;
+              if (newMsg[newMsg.length - 1]) {
+                newMsg[newMsg.length - 1] = { ...newMsg[newMsg.length - 1], id: dataAi.id };
+              }
               return newMsg;
             });
           }
-          if (auth.currentUser) {
+          if (auth.currentUser && !firebaseUser?.isAnonymous) {
             saveMessageToFirestore(activeSessionId, {
               id: dataAi?.id || `ai_${Date.now()}`,
               role: 'model',
@@ -2247,7 +2259,12 @@ export default function App() {
           finalCouncilDebate = await runCouncilDebate(originalInput, contextMessages);
           setMessages((prev) => {
             const updated = [...prev];
-            updated[updated.length - 1].councilDebate = finalCouncilDebate;
+            if (updated[updated.length - 1]) {
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                councilDebate: finalCouncilDebate,
+              };
+            }
             return updated;
           });
         } catch (err) {
@@ -2294,14 +2311,15 @@ export default function App() {
       setMessages(prev => {
         const newMsg = [...prev];
         if (newMsg[newMsg.length - 1]) {
-          if (dataAi?.id) newMsg[newMsg.length - 1].id = dataAi.id;
-          if (postTurnEvaluation) {
-            newMsg[newMsg.length - 1].selfEvaluation = postTurnEvaluation;
-          }
+          newMsg[newMsg.length - 1] = {
+            ...newMsg[newMsg.length - 1],
+            ...(dataAi?.id ? { id: dataAi.id } : {}),
+            ...(postTurnEvaluation ? { selfEvaluation: postTurnEvaluation } : {}),
+          };
         }
         return newMsg;
       });
-      if (auth.currentUser && activeSessionId && aiResponseContent.trim()) {
+      if (auth.currentUser && !firebaseUser?.isAnonymous && activeSessionId && aiResponseContent.trim()) {
         saveMessageToFirestore(activeSessionId, {
           id: dataAi?.id || `ai_${Date.now()}`,
           role: 'model',
@@ -2315,12 +2333,17 @@ export default function App() {
           if (alignRes) {
             setMessages(prev => {
               const updated = [...prev];
-              const target =
-                (dataAi?.id ? updated.find(m => m.id === dataAi.id) : undefined) ||
-                updated[updated.length - 1];
+              const idx = dataAi?.id
+                ? updated.findIndex(m => m.id === dataAi.id)
+                : updated.length - 1;
+              const resolvedIdx = idx >= 0 ? idx : updated.length - 1;
+              const target = updated[resolvedIdx];
               if (target && target.role === 'model') {
-                target.followUpQuestions = alignRes.followUps;
-                target.intentAlignment = alignRes.intentAlignment;
+                updated[resolvedIdx] = {
+                  ...target,
+                  followUpQuestions: alignRes.followUps,
+                  intentAlignment: alignRes.intentAlignment,
+                };
               }
               return updated;
             });
@@ -2367,7 +2390,7 @@ export default function App() {
                 body: JSON.stringify({ name: finalTitle, folder_id: nextFolderId }),
               }).catch(console.error);
 
-              if (auth.currentUser) {
+              if (auth.currentUser && !firebaseUser?.isAnonymous) {
                 saveSessionToFirestore({
                   id: activeSessionId!,
                   name: finalTitle,
@@ -2397,7 +2420,7 @@ export default function App() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId, key: m.key, value: m.value }),
               });
-              if (auth.currentUser) {
+              if (auth.currentUser && !firebaseUser?.isAnonymous) {
                 saveMemoryToFirestore({ key: m.key, value: m.value }).catch(console.error);
               }
             })
@@ -2490,9 +2513,17 @@ export default function App() {
     }
   };
 
-  const handleSendWithPrompt = (promptText: string) => {
-    handleSend(promptText);
-  };
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+
+  const handleSendWithPrompt = useCallback((promptText: string) => {
+    handleSendRef.current(promptText);
+  }, []);
+
+  const handleRunFollowUpResearch = useCallback((followUpQuery: string) => {
+    setSettings(prev => ({ ...prev, deepResearchMode: true }));
+    handleSendRef.current(followUpQuery);
+  }, []);
 
   const [isChatExportOpen, setIsChatExportOpen] = useState(false);
 
@@ -2545,10 +2576,11 @@ export default function App() {
     setSearchResults(Array.isArray(results) ? results : []);
   };
 
-  const handleLogin = () => {
-    if (tempUserId.trim()) {
-      localStorage.setItem('chat_user_id', tempUserId.trim());
-      setUserId(tempUserId.trim());
+  const handleLogin = async () => {
+    const trimmed = tempUserId.trim();
+    if (trimmed) {
+      await signInAnonymously(auth);
+      setDisplayName(trimmed);
     }
   };
 
@@ -2556,8 +2588,9 @@ export default function App() {
     try {
       const fbUser = await signInWithGoogle();
       const displayId = formatCompactUserName(fbUser.email || fbUser.uid, fbUser);
-      localStorage.setItem('chat_user_id', displayId);
-      setUserId(displayId);
+      setDisplayName(displayId);
+      localStorage.setItem('chat_user_id', fbUser.uid);
+      setUserId(fbUser.uid);
       showFolderToast(`Connected to Google Cloud (${displayId})`);
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
@@ -2565,11 +2598,12 @@ export default function App() {
     }
   };
 
-  const handleReflexionUpgradeForMessage = async (msgIndex: number) => {
-    if (reflexionLoadingIndex !== null) return;
-    const targetMsg = messages[msgIndex];
+  const handleReflexionUpgradeForMessage = useCallback(async (msgIndex: number) => {
+    if (reflexionLoadingIndexRef.current !== null) return;
+    const currentMessages = messagesRef.current;
+    const targetMsg = currentMessages[msgIndex];
     if (!targetMsg || targetMsg.role !== 'model') return;
-    const userPrompt = messages[msgIndex - 1]?.content || 'User prompt';
+    const userPrompt = currentMessages[msgIndex - 1]?.content || 'User prompt';
 
     setReflexionLoadingIndex(msgIndex);
     try {
@@ -2622,7 +2656,7 @@ export default function App() {
     } finally {
       setReflexionLoadingIndex(null);
     }
-  };
+  }, [showFolderToast]);
 
   const handleLogout = async () => {
     if (auth.currentUser) {
@@ -4059,7 +4093,7 @@ export default function App() {
                 {firebaseUser?.photoURL ? (
                   <img
                     src={firebaseUser.photoURL}
-                    alt={formatCompactUserName(userId, firebaseUser)}
+                    alt={displayName}
                     referrerPolicy="no-referrer"
                     className="w-8 h-8 rounded-full object-cover border border-current/15"
                   />
@@ -4068,13 +4102,13 @@ export default function App() {
                     "w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border",
                     isEditorial ? "bg-[#f4f4f5] text-[#18181b] border-[#e4e4e7]" : "bg-[#27272a] text-[#f4f4f5] border-[#3f3f46]"
                   )}>
-                    {formatCompactUserName(userId, firebaseUser).slice(0, 1).toUpperCase()}
+                    {displayName.slice(0, 1).toUpperCase()}
                   </div>
                 )}
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-medium truncate">
-                  {formatCompactUserName(userId, firebaseUser)}
+                  {displayName}
                 </div>
                 <div className={cn(
                   "text-[10px] flex items-center gap-1 truncate",
@@ -4837,7 +4871,7 @@ export default function App() {
         ) : (
           <>
             {/* Main Chat Stream */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 scroll-smooth">
+            <div className={cn("flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4", !isLoading && "scroll-smooth")}>
               {messages.length === 0 ? (
                 <WelcomeScreen
                   isEditorial={isEditorial}
@@ -4851,7 +4885,7 @@ export default function App() {
                     setEditingPersona(null);
                     setIsPersonaModalOpen(true);
                   }}
-                  onSetInput={setInput}
+                  onSetInput={setComposerInput}
                   onEnableModeAndPrompt={(mode, promptText) => {
                     if (mode === 'council') {
                       setSettings((prev) => ({ ...prev, councilMode: true }));
@@ -4860,7 +4894,7 @@ export default function App() {
                     } else if (mode === 'steadfast') {
                       setSettings((prev) => ({ ...prev, steadfastMode: true }));
                     }
-                    setInput(promptText);
+                    setComposerInput(promptText);
                   }}
                   onOpenDataStudio={() => setCurrentView('data')}
                 />
@@ -5128,468 +5162,55 @@ export default function App() {
                     );
                   })()}
 
-                  {messages.map((m, i) => (
-                    <motion.div 
-                      id={`msg-item-${i}`}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.22 }}
-                      key={i} 
-                      className="group/msg"
-                    >
-                      {m.role === 'user' ? (
-                        /* User Message Card - Multi-theme */
-                        <div className="flex flex-col items-end gap-1.5">
-                          <div className={cn(
-                            "max-w-[85%] sm:max-w-[78%] rounded-2xl rounded-tr-xs px-4 py-3 text-xs sm:text-[14px] leading-relaxed transition-all shadow-xs",
-                            isEditorial
-                              ? "bg-[#efebe3] text-[#1e1d1b] border border-[#e2dcd0] shadow-[0_2px_8px_rgba(0,0,0,0.04)] font-normal"
-                              : isMidnight
-                              ? "bg-gradient-to-b from-[#141d30] to-[#0f1726] border border-sky-400/20 text-white shadow-md"
-                              : "bg-gradient-to-b from-[#1a1d26] to-[#14161e] border border-white/10 text-white shadow-md"
-                          )}>
-                            {m.images && m.images.length > 0 && (
-                              <div className="flex gap-2 mb-2.5 overflow-x-auto max-w-full">
-                                {m.images.map((img, idx) => (
-                                  <img key={idx} src={img} alt="attached" className="h-24 object-cover rounded-lg border border-black/10 shrink-0" />
-                                ))}
-                              </div>
-                            )}
-                            <div className="whitespace-pre-wrap">{m.content}</div>
-                          </div>
+                  {(() => {
+                    const aiDisplayName =
+                      settings.aiIdentity?.name ||
+                      settings.aiRoleName ||
+                      personas.find((p) => p.id === activePersonaId)?.name ||
+                      'Gemini Atelier';
+                    const aiAvatar = settings.aiIdentity?.avatar || 'sparkles';
+                    const steadfastMode = Boolean(settings.steadfastMode);
 
-                          {/* Subtle User Actions */}
-                          <div className="flex items-center gap-1.5 px-1 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              onClick={() => handleCopyMessage(`user-${i}`, m.content)}
-                              className={cn(
-                                "inline-flex items-center gap-1 h-5 px-1.5 rounded text-[11px] font-medium leading-none transition-colors",
-                                copiedMessageId === `user-${i}`
-                                  ? isEditorial
-                                    ? "text-emerald-700"
-                                    : "text-emerald-400"
-                                  : isEditorial
-                                  ? "text-[#8a8376] hover:text-[#1e1d1b]"
-                                  : "text-[#687082] hover:text-slate-200"
-                              )}
-                              title="Copy message"
-                            >
-                              {copiedMessageId === `user-${i}` ? (
-                                <>
-                                  <Check size={11} className="shrink-0 text-emerald-500" />
-                                  <span>Copied</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy size={11} className="shrink-0" />
-                                  <span>Copy</span>
-                                </>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleForkSession(i)}
-                              className={cn(
-                                "inline-flex items-center gap-1 h-5 px-1.5 rounded text-[11px] font-medium leading-none transition-colors",
-                                isEditorial
-                                  ? "text-[#8a8376] hover:text-amber-800"
-                                  : "text-[#687082] hover:text-sky-400"
-                              )}
-                              title="Fork conversation from this message"
-                            >
-                              <GitBranch size={11} className="shrink-0" />
-                              <span>Fork</span>
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        /* AI Response: High-Craft Editorial Layout */
-                        <div className="flex gap-3.5 items-start">
-                          <div className={cn(
-                            "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-xs border transition-all text-sm",
-                            isEditorial 
-                              ? "bg-amber-100/80 border-amber-300/60 text-amber-900" 
-                              : isMidnight
-                              ? "bg-sky-500/15 border-sky-400/30 text-sky-300"
-                              : "bg-blue-500/15 border-blue-400/25 text-blue-400"
-                          )}>
-                            <VectorIcon name={settings.aiIdentity?.avatar || 'sparkles'} size={15} />
-                          </div>
+                    return messages.map((m, i) => {
+                      const isLast = i === messages.length - 1;
+                      const relevantCopiedId =
+                        copiedMessageId &&
+                        (copiedMessageId === `user-${i}` ||
+                          copiedMessageId === `ai-${i}` ||
+                          copiedMessageId.startsWith(`code-${i}-`))
+                          ? copiedMessageId
+                          : null;
 
-                          <div className="flex-1 min-w-0 space-y-2.5">
-                            {/* Compact Role Header */}
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className={cn(
-                                "font-display font-semibold leading-none",
-                                isEditorial ? "text-[#1e1d1b]" : "text-white"
-                              )}>
-                                {settings.aiIdentity?.name || settings.aiRoleName || personas.find(p => p.id === activePersonaId)?.name || 'Gemini Atelier'}
-                              </span>
-                              {settings.steadfastMode && (
-                                <span className={cn(
-                                  "h-4 px-1.5 rounded border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0",
-                                  isEditorial 
-                                    ? "bg-amber-50 border-amber-300/60 text-amber-800"
-                                    : "bg-amber-500/10 border-amber-500/25 text-amber-300"
-                                )}>
-                                  <Shield size={9} className="shrink-0" />
-                                  <span>Steadfast</span>
-                                </span>
-                              )}
-                              {m.selfEvaluation && (
-                                <button
-                                  type="button"
-                                  onClick={() => setCurrentView('evolution')}
-                                  className={cn(
-                                    "h-4 px-1.5 rounded border inline-flex items-center gap-1 text-[10px] font-mono leading-none shrink-0 transition-all",
-                                    m.selfEvaluation.wasRefined
-                                      ? isEditorial
-                                        ? "bg-purple-50 border-purple-300 text-purple-900 font-semibold"
-                                        : "bg-purple-500/15 border-purple-500/35 text-purple-300 font-semibold"
-                                      : isEditorial
-                                      ? "bg-sky-50 border-sky-200 text-sky-900"
-                                      : "bg-sky-500/10 border-sky-500/25 text-sky-300"
-                                  )}
-                                  title={m.selfEvaluation.critique}
-                                >
-                                  <Activity size={9} className="shrink-0" />
-                                  <span>{m.selfEvaluation.wasRefined ? `V2 · ${m.selfEvaluation.overallScore}%` : `${m.selfEvaluation.overallScore}%`}</span>
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Deep Research Multi-Agent Lab Console */}
-                            {m.deepResearch && (
-                              <DeepResearchTracker
-                                research={m.deepResearch}
-                                reportText={m.content}
-                                theme={theme}
-                                isPinnedToTop={m.deepResearch.isPinnedToThreadTop !== false}
-                                onTogglePinToTop={() => togglePinDeepResearchInsights(i)}
-                                onSaveKeyInsightsToNote={(conclusions) =>
-                                  saveStrategicConclusionsToNote(
-                                    m.deepResearch?.topic || 'Deep Research',
-                                    conclusions
-                                  )
-                                }
-                                onRunFollowUpResearch={(followUpQuery) => {
-                                  setSettings(prev => ({ ...prev, deepResearchMode: true }));
-                                  handleSend(followUpQuery);
-                                }}
-                                onOpenInCanvas={() =>
-                                  openInCanvas({
-                                    type: 'markdown',
-                                    code: m.content,
-                                    title: m.deepResearch?.topic || 'Multi-Agent Research Synthesis',
-                                    messageIndex: i
-                                  })
-                                }
-                              />
-                            )}
-
-                            {/* Editorial Prose Content */}
-                            <div className={cn(
-                              "max-w-none transition-colors",
-                              isEditorial ? "prose prose-neutral text-[#252320]" : "prose prose-invert"
-                            )}>
-                              {m.content ? (
-                                <Markdown
-                                  remarkPlugins={[remarkGfm, remarkMath]}
-                                  rehypePlugins={[rehypeKatex]}
-                                  components={{
-                                    table({ children, ...props }) {
-                                      return (
-                                        <div
-                                          className={cn(
-                                            "my-3.5 overflow-x-auto rounded-xl border",
-                                            isEditorial
-                                              ? "border-[#dcd5c7] bg-[#fdfbf7]"
-                                              : "border-white/10 bg-[#0d1018]/70"
-                                          )}
-                                        >
-                                          <table {...props} className="!my-0 w-full border-collapse">
-                                            {children}
-                                          </table>
-                                        </div>
-                                      );
-                                    },
-                                    pre({ children, ...props }) {
-                                      const childEl = Array.isArray(children) ? children[0] : children;
-                                      const codeProps = (childEl as any)?.props || {};
-                                      const className = String(codeProps.className || '');
-                                      const langMatch = className.match(/language-([\w-]+)/);
-                                      const lang = (langMatch ? langMatch[1] : 'code').toLowerCase();
-                                      const rawCode = String(codeProps.children || '').replace(/\n$/, '');
-                                      const codeKey = `code-${i}-${rawCode.slice(0, 24).replace(/\s+/g, '_')}`;
-
-                                      if (lang === 'mermaid') {
-                                        return (
-                                          <div className="my-3.5 w-full">
-                                            <Suspense
-                                              fallback={
-                                                <div
-                                                  className={cn(
-                                                    "h-[240px] rounded-xl border flex items-center justify-center text-xs font-mono",
-                                                    isEditorial
-                                                      ? "bg-[#fbfaf7] border-[#dcd5c7] text-[#5c5549]"
-                                                      : "bg-[#0b0e15] border-white/10 text-slate-400"
-                                                  )}
-                                                >
-                                                  Rendering diagram...
-                                                </div>
-                                              }
-                                            >
-                                              <LazyMermaidRenderer
-                                                code={rawCode}
-                                                isEditorial={isEditorial}
-                                                onOpenInCanvas={() => {
-                                                  setActiveArtifact({
-                                                    type: 'mermaid',
-                                                    code: rawCode,
-                                                    title: `Diagram #${i + 1}`,
-                                                    messageIndex: i
-                                                  });
-                                                  setCanvasHistory([rawCode]);
-                                                  setWorkspaceTab('preview');
-                                                  setIsWorkspaceOpen(true);
-                                                }}
-                                              />
-                                            </Suspense>
-                                          </div>
-                                        );
-                                      }
-
-                                      return (
-                                        <div className="relative group/code my-3 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
-                                          <div
-                                            className={cn(
-                                              "flex items-center justify-between px-3 py-1.5 text-[11px] font-mono border-b",
-                                              isEditorial
-                                                ? "bg-[#ebe5d9] border-[#dcd5c7] text-[#5c5549]"
-                                                : "bg-[#141824] border-white/10 text-slate-400"
-                                            )}
-                                          >
-                                            <span className="uppercase tracking-wider text-[10px] font-semibold opacity-80">
-                                              {lang}
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleCopyMessage(codeKey, rawCode, 'Copied code block')}
-                                              className={cn(
-                                                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium transition-colors",
-                                                copiedMessageId === codeKey
-                                                  ? "text-emerald-500"
-                                                  : isEditorial
-                                                  ? "text-[#5c5549] hover:text-[#1e1d1b] hover:bg-black/5"
-                                                  : "text-slate-300 hover:text-white hover:bg-white/10"
-                                              )}
-                                              title="Copy code block"
-                                            >
-                                              {copiedMessageId === codeKey ? (
-                                                <>
-                                                  <Check size={11} className="shrink-0 text-emerald-500" />
-                                                  <span>Copied</span>
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <Copy size={11} className="shrink-0" />
-                                                  <span>Copy</span>
-                                                </>
-                                              )}
-                                            </button>
-                                          </div>
-                                          <pre {...props} className="!my-0 !rounded-t-none">
-                                            {children}
-                                          </pre>
-                                        </div>
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {m.content}
-                                </Markdown>
-                              ) : (
-                                isLoading && i === messages.length - 1 && (
-                                  <div className="flex items-center gap-2 py-1.5 text-xs opacity-75">
-                                    <Loader2 size={13} className="animate-spin text-indigo-500 shrink-0" />
-                                    <span>Generating...</span>
-                                  </div>
-                                )
-                              )}
-                            </div>
-
-                            {/* AI Council Multi-Expert Debate View */}
-                            {m.councilDebate && (
-                              <CouncilDebateView
-                                debate={m.councilDebate}
-                                onSelectFollowUp={(promptText) => handleSendWithPrompt(promptText)}
-                                theme={theme}
-                              />
-                            )}
-
-                            {/* Search Grounding Sources */}
-                            {m.groundingMetadata?.groundingChunks && (
-                              <div className="pt-0.5 flex flex-wrap items-center gap-1.5">
-                                <span className={cn(
-                                  "text-[10px] font-mono inline-flex items-center gap-1 mr-0.5 leading-none shrink-0",
-                                  isEditorial ? "text-emerald-800 font-semibold" : "text-emerald-400"
-                                )}>
-                                  <ExternalLink size={10} className="shrink-0" /> Sources:
-                                </span>
-                                {m.groundingMetadata.groundingChunks.map((chunk: any, idx: number) => (
-                                  chunk.web && (
-                                    <a 
-                                      key={idx}
-                                      href={chunk.web.uri}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className={cn(
-                                        "h-5 px-2 rounded text-[11px] inline-flex items-center gap-1 transition-all border leading-none shrink-0",
-                                        isEditorial
-                                          ? "bg-white border-[#e6e2d8] text-[#554f46] hover:text-emerald-800 hover:border-emerald-500/50"
-                                          : "bg-[#0e1118] border-white/[0.07] hover:border-emerald-500/35 text-[#9fa5b5] hover:text-emerald-300"
-                                      )}
-                                    >
-                                      <span className="truncate max-w-[160px]">{chunk.web.title}</span>
-                                    </a>
-                                  )
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Approved 5-Button Concise Action Bar: Copy · Canvas · Refine · Note · Fork */}
-                            {m.content && (
-                              <div className={cn(
-                                "pt-0.5 flex flex-wrap items-center gap-1 text-[11px]",
-                                isEditorial ? "text-[#7a7368]" : "text-[#7c808c]"
-                              )}>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyMessage(`ai-${i}`, m.content)}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
-                                    copiedMessageId === `ai-${i}`
-                                      ? isEditorial
-                                        ? "bg-emerald-50 text-emerald-800"
-                                        : "bg-emerald-500/15 text-emerald-300"
-                                      : isEditorial
-                                      ? "hover:bg-black/5 hover:text-[#1e1d1b]"
-                                      : "hover:bg-white/[0.06] hover:text-white"
-                                  )}
-                                  title="Copy response"
-                                >
-                                  {copiedMessageId === `ai-${i}` ? (
-                                    <>
-                                      <Check size={11} className="shrink-0 text-emerald-500" />
-                                      <span>Copied</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy size={11} className="shrink-0" />
-                                      <span>Copy</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {extractArtifacts(m.content) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const art = extractArtifacts(m.content);
-                                      if (art) {
-                                        setActiveArtifact({
-                                          ...art,
-                                          title:
-                                            art.type === 'mermaid'
-                                              ? `Diagram #${i + 1}`
-                                              : art.type === 'latex'
-                                              ? `LaTeX #${i + 1}`
-                                              : `Preview #${i + 1}`,
-                                          messageIndex: i,
-                                        });
-                                        setCanvasHistory([art.code]);
-                                        setWorkspaceTab('preview');
-                                        setIsWorkspaceOpen(true);
-                                      }
-                                    }}
-                                    className={cn(
-                                      "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
-                                      isEditorial
-                                        ? "text-purple-800 hover:bg-purple-50"
-                                        : "text-purple-300 hover:bg-purple-500/15"
-                                    )}
-                                    title="Open Canvas & Interactive Preview"
-                                  >
-                                    <Eye size={11} className="shrink-0" />
-                                    <span>Canvas</span>
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleReflexionUpgradeForMessage(i)}
-                                  disabled={reflexionLoadingIndex === i}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
-                                    isEditorial
-                                      ? "hover:bg-black/5 hover:text-purple-900"
-                                      : "hover:bg-white/[0.06] hover:text-purple-300"
-                                  )}
-                                  title="Self-Critique & Refine response (Reflexion V2)"
-                                >
-                                  {reflexionLoadingIndex === i ? (
-                                    <Loader2 size={11} className="animate-spin text-purple-500 shrink-0" />
-                                  ) : (
-                                    <Sparkles size={11} className="shrink-0" />
-                                  )}
-                                  <span>{m.selfEvaluation?.wasRefined ? 'Refined' : 'Refine'}</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleForkSession(i)}
-                                  className={cn(
-                                    "h-6 px-2 rounded-md inline-flex items-center gap-1 font-medium leading-none transition-colors",
-                                    isEditorial
-                                      ? "hover:bg-black/5 hover:text-[#1e1d1b]"
-                                      : "hover:bg-white/[0.06] hover:text-white"
-                                  )}
-                                  title="Branch / Fork conversation from this message"
-                                >
-                                  <GitBranch size={11} className="shrink-0" />
-                                  <span>Fork</span>
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Suggested Follow-ups */}
-                            {m.followUpQuestions && m.followUpQuestions.length > 0 && (
-                              <div className="pt-1 flex flex-wrap gap-1.5">
-                                {m.followUpQuestions.map((q, qIdx) => (
-                                  <button
-                                    key={qIdx}
-                                    onClick={() => handleSendWithPrompt(q)}
-                                    className={cn(
-                                      "text-left text-xs px-3 py-1.5 rounded-xl border transition-all inline-flex items-center gap-1.5 shadow-xs leading-normal",
-                                      isEditorial
-                                        ? "bg-white hover:bg-amber-50/70 border-[#e2dcd0] hover:border-amber-400 text-[#453f35] hover:text-[#1e1d1b]"
-                                        : isMidnight
-                                        ? "bg-[#101726] hover:bg-[#162033] border-[#1d2942] hover:border-sky-400/40 text-[#9bb0ce] hover:text-white"
-                                        : "bg-[#0c0f17] hover:bg-[#131826] border-white/[0.06] hover:border-blue-500/35 text-[#9fa5b5] hover:text-white"
-                                    )}
-                                  >
-                                    <ChevronRight size={12} className={cn("shrink-0", isEditorial ? "text-amber-700" : "text-blue-400")} />
-                                    <span>{q}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  ))}
+                      return (
+                        <MessageItem
+                          key={m.id ?? m.clientId}
+                          message={m}
+                          index={i}
+                          isLast={isLast}
+                          isStreaming={isLoading && isLast}
+                          theme={theme}
+                          isEditorial={isEditorial}
+                          isMidnight={isMidnight}
+                          aiDisplayName={aiDisplayName}
+                          aiAvatar={aiAvatar}
+                          steadfastMode={steadfastMode}
+                          copiedMessageId={relevantCopiedId}
+                          isReflexionLoading={reflexionLoadingIndex === i}
+                          onCopyMessage={handleCopyMessage}
+                          onForkSession={handleForkSession}
+                          onOpenEvolutionView={handleOpenEvolutionView}
+                          onTogglePinDeepResearch={togglePinDeepResearchInsights}
+                          onSaveKeyInsightsToNote={saveStrategicConclusionsToNote}
+                          onRunFollowUpResearch={handleRunFollowUpResearch}
+                          onOpenInCanvas={openInCanvas}
+                          onOpenMermaidInCanvas={handleOpenMermaidInCanvas}
+                          onOpenExtractedArtifactInCanvas={handleOpenExtractedArtifactInCanvas}
+                          onSelectFollowUp={handleSendWithPrompt}
+                          onReflexionUpgrade={handleReflexionUpgradeForMessage}
+                        />
+                      );
+                    });
+                  })()}
                   <div className="h-4" />
                   <div ref={messagesEndRef} />
                 </div>
@@ -5597,473 +5218,44 @@ export default function App() {
             </div>
 
             {/* Studio Command Composer Dock - Solid bottom panel, never floating or overlapping messages */}
-            <div className={cn(
-              "px-3 sm:px-4 pb-3 sm:pb-4 pt-2 shrink-0 z-20 border-t backdrop-blur-md transition-colors",
-              isEditorial 
-                ? "bg-[#fafafa]/98 border-[#e4e4e7]" 
-                : "bg-[#09090b]/98 border-[#27272a]"
-            )}>
-              <div className={cn("relative", getChatContainerClass())}>
-                {/* Attached Context & Image Previews */}
-                {(attachedContexts.length > 0 || selectedImages.length > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
-                    {attachedContexts.map(ctx => (
-                      <div 
-                        key={`${ctx.type}-${ctx.id}`} 
-                        className={cn(
-                          "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium shadow-xs",
-                          isEditorial
-                            ? "bg-amber-50 border-amber-300 text-amber-900"
-                            : "bg-blue-500/10 border-blue-500/25 text-blue-300"
-                        )}
-                      >
-                        {ctx.type === 'document' ? <FileText size={12} className="shrink-0" /> : <NotebookIcon size={12} className="shrink-0" />}
-                        <span className="max-w-[150px] truncate">{ctx.title}</span>
-                        <button 
-                          onClick={() => removeContextItem(ctx.id, ctx.type)} 
-                          className="hover:text-red-500 ml-1 text-xs"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    {selectedImages.map((img, i) => (
-                      <div key={i} className="relative group shrink-0">
-                        <img src={img} alt="upload" className="w-11 h-11 object-cover rounded-lg border border-black/10 shadow-xs" />
-                        <button 
-                          onClick={() => setSelectedImages(prev => prev.filter((_, index) => index !== i))}
-                          className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X size={9} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Smart Persona Auto-Detection Banner above Composer */}
-                {(() => {
-                  const routeSuggestion = input.trim().length >= 8
-                    ? detectOptimalPersona(input, personas, activePersonaId)
-                    : null;
-                  if (!routeSuggestion) return null;
-                  return (
-                    <div className={cn(
-                      "mb-2 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs transition-all",
-                      isEditorial
-                        ? "bg-amber-50/95 border-amber-300 text-amber-950"
-                        : isMidnight
-                        ? "bg-[#121d33]/95 border-sky-500/40 text-sky-200"
-                        : "bg-[#141926]/95 border-blue-500/35 text-blue-200"
-                    )}>
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <VectorIcon name={routeSuggestion.persona.emoji} size={13} className="shrink-0 text-amber-500" />
-                        <span className="truncate text-[11px]">
-                          Suggested: <strong>{routeSuggestion.reason}</strong>:{' '}
-                          <strong>{routeSuggestion.persona.name}</strong>
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => selectPersona(routeSuggestion.persona)}
-                          className={cn(
-                            "h-6 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 transition-all shadow-2xs",
-                            isEditorial
-                              ? "bg-amber-700 hover:bg-amber-800 text-white"
-                              : "bg-sky-500 hover:bg-sky-400 text-white"
-                          )}
-                        >
-                          <VectorIcon name={routeSuggestion.persona.emoji} size={11} />
-                          <span>Switch</span>
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Unified Command Deck Surface */}
-                <div className={cn(
-                  "rounded-2xl transition-all overflow-hidden border shadow-sm",
-                  isEditorial
-                    ? "bg-white border-[#e4e4e7]"
-                    : "bg-[#121215] border-[#27272a]"
-                )}>
-                  <div className="p-2.5 sm:p-3">
-                    {/* Tier 1: Auto-expanding Textarea */}
-                    <textarea 
-                      rows={1}
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        // 1. Ignore Enter during IME composition (Vietnamese Telex, Japanese, Korean)
-                        if (e.nativeEvent.isComposing) return;
-
-                        // 2. On mobile / phone keyboards, Enter must always insert a newline, NEVER send.
-                        // Message dispatch is confirmed only by tapping the Send button on the app.
-                        if (isMobileDevice()) {
-                          return;
-                        }
-
-                        // 3. On desktop with physical keyboard, Enter sends and Shift+Enter inserts a newline.
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSend();
-                        }
-                      }}
-                      placeholder={
-                        settings.deepResearchMode
-                          ? "Enter research topic for autonomous multi-agent deep research..."
-                          : settings.councilMode
-                          ? "Pose a strategic or technical question for the 3-Expert Council..."
-                          : "Ask anything, request in-depth analysis, or design code / diagrams..."
-                      }
-                      className={cn(
-                        "w-full bg-transparent border-none focus:ring-0 text-xs sm:text-[14px] py-1 px-1.5 resize-none max-h-44 min-h-[38px] focus:outline-none leading-relaxed",
-                        isEditorial
-                          ? "text-[#18181b] placeholder-[#a1a1aa]"
-                          : "text-[#f4f4f5] placeholder-[#71717a]"
-                      )}
-                    />
-
-                    {/* Tier 2: Integrated Studio Controls */}
-                    <div className={cn(
-                      "flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 pt-2 mt-1 border-t",
-                      isEditorial ? "border-[#f4f4f5]" : "border-[#1f1f23]"
-                    )}>
-                      {/* Left Controls: Attachments + Cognitive Engine Toggles */}
-                      <div className="flex items-center gap-1 flex-wrap min-w-0">
-                        {/* Context Attachment Dropdown Trigger */}
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() => setIsAttachMenuOpen(!isAttachMenuOpen)}
-                            className={cn(
-                              "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
-                              isEditorial
-                                ? isAttachMenuOpen 
-                                  ? "bg-[#f4f4f5] text-[#18181b]" 
-                                  : "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
-                                : isAttachMenuOpen 
-                                ? "bg-[#27272a] text-[#f4f4f5]" 
-                                : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                            )}
-                            title="Attach Documents / Notes"
-                          >
-                            <Paperclip size={14} className="shrink-0" />
-                          </button>
-
-                          <AnimatePresence>
-                            {isAttachMenuOpen && (
-                              <motion.div
-                                initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                                className={cn(
-                                  "absolute bottom-10 left-0 w-64 max-h-64 border rounded-xl shadow-xl overflow-y-auto z-40 p-2.5 space-y-2.5",
-                                  isEditorial 
-                                    ? "bg-white border-[#e4e4e7] text-[#18181b]" 
-                                    : "bg-[#121215] border-[#27272a] text-[#f4f4f5]"
-                                )}
-                              >
-                                <div className={cn(
-                                  "flex justify-between items-center pb-1 border-b",
-                                  isEditorial ? "border-[#f4f4f5]" : "border-[#27272a]"
-                                )}>
-                                  <span className={cn(
-                                    "text-[10px] font-mono uppercase tracking-wider",
-                                    isEditorial ? "text-[#71717a]" : "text-[#a1a1aa]"
-                                  )}>
-                                    Attach Context
-                                  </span>
-                                  <button onClick={() => setIsAttachMenuOpen(false)} className="opacity-60 hover:opacity-100">
-                                    <X size={11} className="shrink-0" />
-                                  </button>
-                                </div>
-                                <div className="space-y-1">
-                                  <span className={cn(
-                                    "text-[9px] font-mono uppercase block px-1 font-semibold",
-                                    isEditorial ? "text-[#52525b]" : "text-[#a1a1aa]"
-                                  )}>
-                                    Documents ({documents.length})
-                                  </span>
-                                  {documents.length === 0 ? (
-                                    <span className="text-[11px] opacity-40 block px-1">Empty</span>
-                                  ) : (
-                                    documents.map(d => (
-                                      <button
-                                        key={d.id}
-                                        onClick={() => attachContextItem({ id: d.id, type: 'document', title: d.title, content: d.content })}
-                                        className={cn(
-                                          "w-full text-left p-1.5 rounded-lg text-xs flex items-center gap-2 truncate transition-colors",
-                                          isEditorial ? "hover:bg-[#f4f4f5] text-[#18181b]" : "hover:bg-[#1f1f23] text-[#e4e4e7]"
-                                        )}
-                                      >
-                                        <FileText size={12} className="shrink-0 opacity-70" />
-                                        <span className="truncate flex-1">{d.title}</span>
-                                      </button>
-                                    ))
-                                  )}
-                                </div>
-                                <div className={cn(
-                                  "space-y-1 pt-1 border-t",
-                                  isEditorial ? "border-[#f4f4f5]" : "border-[#27272a]"
-                                )}>
-                                  <span className={cn(
-                                    "text-[9px] font-mono uppercase block px-1 font-semibold",
-                                    isEditorial ? "text-[#52525b]" : "text-[#a1a1aa]"
-                                  )}>
-                                    Notes ({notes.length})
-                                  </span>
-                                  {notes.length === 0 ? (
-                                    <span className="text-[11px] opacity-40 block px-1">Empty</span>
-                                  ) : (
-                                    notes.map(n => (
-                                      <button
-                                        key={n.id}
-                                        onClick={() => attachContextItem({ id: n.id, type: 'note', title: n.title, content: n.content })}
-                                        className={cn(
-                                          "w-full text-left p-1.5 rounded-lg text-xs flex items-center gap-2 truncate transition-colors",
-                                          isEditorial ? "hover:bg-[#f4f4f5] text-[#18181b]" : "hover:bg-[#1f1f23] text-[#e4e4e7]"
-                                        )}
-                                      >
-                                        <NotebookIcon size={12} className="shrink-0 opacity-70" />
-                                        <span className="truncate flex-1">{n.title}</span>
-                                      </button>
-                                    ))
-                                  )}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-
-                        {/* Image Upload */}
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className={cn(
-                            "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
-                            isEditorial 
-                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
-                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="Upload Image"
-                        >
-                          <ImageIcon size={14} className="shrink-0" />
-                        </button>
-                        <input 
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          ref={fileInputRef} 
-                          onChange={handleImageUpload} 
-                          className="hidden" 
-                        />
-
-                        {/* Voice Input */}
-                        <button
-                          type="button"
-                          onClick={toggleRecording}
-                          className={cn(
-                            "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
-                            isRecording 
-                              ? "bg-red-500/20 text-red-500 animate-pulse" 
-                              : isEditorial 
-                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
-                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title={isRecording ? "Stop Recording" : "Voice Input"}
-                        >
-                          <Mic size={14} className="shrink-0" />
-                        </button>
-
-                        <span className={cn(
-                          "h-4 w-[1px] mx-1 my-auto inline-block shrink-0",
-                          isEditorial ? "bg-[#e4e4e7]" : "bg-[#27272a]"
-                        )} />
-
-                        {/* Minimalist Cognitive Mode Switches with Semantic Active Accents */}
-                        <button
-                          type="button"
-                          onClick={() => setSettings(prev => ({ ...prev, steadfastMode: !prev.steadfastMode }))}
-                          className={cn(
-                            "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
-                            settings.steadfastMode
-                              ? isEditorial
-                                ? "bg-amber-50 border-amber-300 text-amber-900 font-semibold"
-                                : "bg-amber-500/15 border-amber-500/35 text-amber-300 font-semibold"
-                              : isEditorial
-                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
-                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="Steadfast Epistemic Mode (Anti-Sycophancy)"
-                        >
-                          <Shield size={12} className={cn("shrink-0", settings.steadfastMode ? (isEditorial ? "text-amber-600" : "text-amber-400") : "")} />
-                          <span className="hidden sm:inline">Steadfast</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setSettings(prev => ({ ...prev, councilMode: !prev.councilMode }))}
-                          className={cn(
-                            "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
-                            settings.councilMode
-                              ? isEditorial
-                                ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-semibold"
-                                : "bg-indigo-500/15 border-indigo-500/35 text-indigo-300 font-semibold"
-                              : isEditorial
-                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
-                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="AI Council (3 Dialectical Experts)"
-                        >
-                          <Users size={12} className={cn("shrink-0", settings.councilMode ? (isEditorial ? "text-indigo-600" : "text-indigo-400") : "")} />
-                          <span className="hidden sm:inline">Council</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setSettings(prev => ({ ...prev, deepResearchMode: !prev.deepResearchMode }))}
-                          className={cn(
-                            "h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-all border inline-flex items-center gap-1.5 shrink-0 leading-none",
-                            settings.deepResearchMode
-                              ? isEditorial
-                                ? "bg-sky-50 border-sky-300 text-sky-900 font-semibold"
-                                : "bg-sky-500/15 border-sky-500/35 text-sky-300 font-semibold"
-                              : isEditorial
-                              ? "border-transparent text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]"
-                              : "border-transparent text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="Deep Research (Autonomous Multi-Agent)"
-                        >
-                          <Compass size={12} className={cn("shrink-0", settings.deepResearchMode ? (isEditorial ? "text-sky-600" : "text-sky-400") : "")} />
-                          <span className="hidden sm:inline">Research</span>
-                        </button>
-                      </div>
-
-                      {/* Right Controls: Canvas Trigger, Auto-Speak, Enhance Wand & Send */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openInCanvas({
-                              type:
-                                input.trim().includes('\\documentclass') || input.trim().includes('\\section')
-                                  ? 'latex'
-                                  : 'markdown',
-                              code: input.trim() || '# New Document / Code\n\nEnter content or instruct AI to edit here...',
-                              title: 'Interactive Canvas'
-                            })
-                          }
-                          className={cn(
-                            "hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors shrink-0 leading-none border",
-                            isEditorial
-                              ? "border-[#e4e4e7] text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5]"
-                              : "border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="Open Canvas Workspace (Markdown, Code & LaTeX)"
-                        >
-                          <Edit3 size={12} className={cn("shrink-0", isEditorial ? "text-indigo-600" : "text-indigo-400")} />
-                          <span>Canvas</span>
-                        </button>
-
-                        <button 
-                          type="button"
-                          onClick={() => setIsAutoSpeak(!isAutoSpeak)}
-                          className={cn(
-                            "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
-                            isAutoSpeak 
-                              ? isEditorial ? "text-emerald-700 bg-emerald-50" : "text-emerald-400 bg-emerald-500/15" 
-                              : isEditorial 
-                              ? "text-[#71717a] hover:text-[#18181b] hover:bg-[#f4f4f5]" 
-                              : "text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1f1f23]"
-                          )}
-                          title="Auto-Speak Responses"
-                        >
-                          {isAutoSpeak ? <Volume2 size={13} className="shrink-0" /> : <VolumeX size={13} className="shrink-0" />}
-                        </button>
-
-                        {input.trim() && (
-                          <button
-                            type="button"
-                            onClick={enhanceUserPrompt}
-                            disabled={isEnhancing}
-                            className={cn(
-                              "w-8 h-8 rounded-lg inline-flex items-center justify-center transition-colors shrink-0",
-                              isEditorial
-                                ? "text-violet-600 hover:bg-violet-50"
-                                : "text-violet-400 hover:bg-violet-500/15",
-                              isEnhancing && "animate-spin opacity-60"
-                            )}
-                            title="Optimize Prompt"
-                          >
-                            <Wand2 size={14} className="shrink-0" />
-                          </button>
-                        )}
-
-                        {input.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!input.trim()) return;
-                              const currentText = input.trim();
-                              batchQueue.enqueueTask(
-                                'deep_research',
-                                `Deep Research: ${currentText.slice(0, 48)}...`,
-                                'Autonomous multi-agent research executed in background batch queue',
-                                { query: currentText, targetFormat: 'imrad_q1' }
-                              );
-                              setInput('');
-                            }}
-                            className={cn(
-                              "h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-all shrink-0 leading-none",
-                              isEditorial
-                                ? "bg-[#f4f4f5] hover:bg-[#e4e4e7] border-[#e4e4e7] text-[#18181b]"
-                                : "bg-[#1f1f23] hover:bg-[#27272a] border-[#27272a] text-[#f4f4f5]"
-                            )}
-                            title="Enqueue in Background Batch Queue without blocking chat"
-                          >
-                            <Layers size={12} className={cn("shrink-0", isEditorial ? "text-cyan-600" : "text-cyan-400")} />
-                            <span className="hidden sm:inline">Run Background</span>
-                          </button>
-                        )}
-
-                        {isLoading ? (
-                          <button 
-                            type="button"
-                            onClick={handleStopExecution}
-                            className="h-8 px-3.5 rounded-lg text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none shadow-xs bg-rose-600 text-white hover:bg-rose-500 active:scale-95"
-                            title="Stop execution (Esc)"
-                          >
-                            <Square size={12} className="shrink-0 fill-current" />
-                            <span>Stop</span>
-                          </button>
-                        ) : (
-                          <button 
-                            type="button"
-                            onClick={() => handleSend()}
-                            disabled={!input.trim() && selectedImages.length === 0}
-                            className={cn(
-                              "h-8 px-3.5 rounded-lg text-xs font-medium transition-all inline-flex items-center justify-center gap-1.5 shrink-0 leading-none",
-                              (input.trim() || selectedImages.length > 0)
-                                ? "bg-indigo-600 text-white hover:bg-indigo-500 active:scale-95 shadow-2xs"
-                                : isEditorial
-                                ? "bg-[#f4f4f5] text-[#a1a1aa] cursor-not-allowed"
-                                : "bg-[#1f1f23] text-[#52525b] cursor-not-allowed"
-                            )}
-                            title="Send message"
-                          >
-                            <Send size={13} className="shrink-0" />
-                            <span className="hidden xs:inline">Send</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <Composer
+              ref={composerRef}
+              onSend={handleSendWithPrompt}
+              isLoading={isLoading}
+              onStop={handleStopExecution}
+              isEditorial={isEditorial}
+              isMidnight={isMidnight}
+              chatContainerClass={getChatContainerClass()}
+              settings={settings}
+              setSettings={setSettings}
+              personas={personas}
+              activePersonaId={activePersonaId}
+              onSelectPersona={selectPersona}
+              attachedContexts={attachedContexts}
+              onAttachContextItem={attachContextItem}
+              onRemoveContextItem={removeContextItem}
+              isAttachMenuOpen={isAttachMenuOpen}
+              setIsAttachMenuOpen={setIsAttachMenuOpen}
+              documents={documents}
+              notes={notes}
+              selectedImages={selectedImages}
+              setSelectedImages={setSelectedImages}
+              fileInputRef={fileInputRef}
+              onImageUpload={handleImageUpload}
+              isRecording={isRecording}
+              onToggleRecording={toggleRecording}
+              isAutoSpeak={isAutoSpeak}
+              setIsAutoSpeak={setIsAutoSpeak}
+              onOpenInCanvas={openInCanvas}
+              onEnqueueBackgroundResearch={(currentText) => {
+                batchQueue.enqueueTask(
+                  'deep_research',
+                  `Deep Research: ${currentText.slice(0, 48)}...`,
+                  'Autonomous multi-agent research executed in background batch queue',
+                  { query: currentText, targetFormat: 'imrad_q1' }
+                );
+              }}
+            />
           </>
         )}
         </main>
@@ -6144,7 +5336,7 @@ export default function App() {
                       {firebaseUser?.photoURL ? (
                         <img
                           src={firebaseUser.photoURL}
-                          alt={formatCompactUserName(userId, firebaseUser)}
+                          alt={displayName}
                           referrerPolicy="no-referrer"
                           className={cn(
                             "w-9 h-9 rounded-full object-cover shrink-0 border",
@@ -6156,12 +5348,12 @@ export default function App() {
                           "w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 border",
                           isEditorial ? "bg-[#e4e4e7] text-[#18181b] border-[#d4d4d8]" : "bg-[#27272a] text-[#f4f4f5] border-[#3f3f46]"
                         )}>
-                          {formatCompactUserName(userId, firebaseUser).slice(0, 1).toUpperCase()}
+                          {displayName.slice(0, 1).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0">
                         <div className="text-xs font-semibold truncate">
-                          {formatCompactUserName(userId, firebaseUser)}
+                          {displayName}
                         </div>
                         <div className="text-[10px] opacity-65 flex items-center gap-1.5">
                           <span className={cn(

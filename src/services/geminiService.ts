@@ -474,16 +474,15 @@ ${settings.coreTenets ? `\nImmutable Core Tenets:\n${settings.coreTenets}` : ""}
     });
 
     if (!response.ok || !response.body) {
-      const errData = await response.json().catch(() => ({ error: "Failed to connect to Gemini endpoint" }));
-      const errMsg = errData?.text || errData?.error || "Failed to connect to Gemini endpoint";
-      onStream(errMsg);
-      return errMsg;
+      const errData = await response.json().catch(() => ({ error: "Gemini request failed" }));
+      throw new Error(errData.error || "Gemini request failed");
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let fullText = "";
     let buffer = "";
+    let finished = false;
 
     try {
       while (true) {
@@ -501,22 +500,29 @@ ${settings.coreTenets ? `\nImmutable Core Tenets:\n${settings.coreTenets}` : ""}
           if (line.startsWith("data: ")) {
             const jsonStr = line.slice(6).trim();
             if (!jsonStr) continue;
+            let payload: any;
             try {
-              const payload = JSON.parse(jsonStr);
-              if (payload.done) break;
-              if (payload.text) {
-                fullText += payload.text;
-                onStream(payload.text);
-              } else if (payload.error && !fullText) {
-                fullText += payload.error;
-                onStream(payload.error);
-              }
-              if (payload.groundingMetadata && onGrounding) {
-                onGrounding(payload.groundingMetadata);
-              }
-            } catch (_) {}
+              payload = JSON.parse(jsonStr);
+            } catch (_) {
+              continue;
+            }
+            if (payload.error) {
+              throw new Error(payload.error);
+            }
+            if (payload.done) {
+              finished = true;
+              break;
+            }
+            if (payload.text) {
+              fullText += payload.text;
+              onStream(payload.text);
+            }
+            if (payload.groundingMetadata && onGrounding) {
+              onGrounding(payload.groundingMetadata);
+            }
           }
         }
+        if (finished) break;
       }
     } catch (err: any) {
       if (err.name === 'AbortError' || abortSignal?.aborted) {
@@ -541,6 +547,9 @@ ${settings.coreTenets ? `\nImmutable Core Tenets:\n${settings.coreTenets}` : ""}
       }),
     });
     const data = await response.json().catch(() => ({ text: "" }));
+    if (!response.ok) {
+      throw new Error(data.error);
+    }
     return data.text || "";
   }
 }

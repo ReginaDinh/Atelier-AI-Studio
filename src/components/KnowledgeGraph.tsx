@@ -55,6 +55,7 @@ export default function KnowledgeGraph({
   const [scope, setScope] = useState<'current' | 'all'>('current');
   const [graphData, setGraphData] = useState<KnowledgeGraphData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [isAiExtracting, setIsAiExtracting] = useState<boolean>(false);
   
   // UI & Filter states
@@ -76,16 +77,23 @@ export default function KnowledgeGraph({
   // Fetch graph data from backend
   const fetchGraphData = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       let url = `/api/knowledge-graph?userId=${encodeURIComponent(userId)}`;
       if (scope === 'current' && currentSessionId) {
         url += `&sessionId=${encodeURIComponent(currentSessionId)}`;
       }
       const res = await fetch(url);
-      const data: KnowledgeGraphData = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+        setError('Invalid knowledge graph data format');
+        return;
+      }
       setGraphData(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load knowledge graph:', err);
+      setError(err?.message || 'Failed to load knowledge graph');
     } finally {
       setIsLoading(false);
     }
@@ -98,31 +106,43 @@ export default function KnowledgeGraph({
   // AI-Powered Deep Semantic Extraction
   const handleAiDeepExtract = async () => {
     if (messages.length === 0) {
-      alert("No messages available in current chat to analyze.");
       return;
     }
     setIsAiExtracting(true);
     try {
       const aiResult = await extractKnowledgeGraphWithAI(messages, currentSessionId || undefined);
       if (aiResult.nodes.length > 0) {
-        setGraphData(prev => {
-          if (!prev) return {
-            nodes: aiResult.nodes.map(n => ({ ...n, sessions: [currentSessionId || 'current'] })),
-            links: aiResult.links,
-            summary: {
-              totalEntities: aiResult.nodes.length,
-              totalRelationships: aiResult.links.length,
-              topCategory: 'concept',
-              density: 0.1
-            }
-          };
+        const getEndpointId = (endpoint: string | GraphNode) =>
+          typeof endpoint === 'object' ? endpoint.id : endpoint;
 
-          const existingNodeMap = new Map(prev.nodes.map(n => [n.id, n]));
+        setGraphData(prev => {
+          if (!prev) {
+            const nodes = aiResult.nodes.map(n => ({ ...n, sessions: [currentSessionId || 'current'] }));
+            const validIds = new Set(nodes.map(n => n.id));
+            const validLinks = aiResult.links
+              .filter(l => validIds.has(getEndpointId(l.source)) && validIds.has(getEndpointId(l.target)))
+              .map(l => ({ ...l, source: getEndpointId(l.source), target: getEndpointId(l.target) }));
+            return {
+              nodes,
+              links: validLinks,
+              summary: {
+                totalEntities: nodes.length,
+                totalRelationships: validLinks.length,
+                topCategory: 'concept',
+                density: 0.1
+              }
+            };
+          }
+
+          const existingNodeMap = new Map(prev.nodes.map(n => [n.id, { ...n }]));
           aiResult.nodes.forEach(newNode => {
             if (existingNodeMap.has(newNode.id)) {
               const cur = existingNodeMap.get(newNode.id)!;
-              cur.count += newNode.count;
-              cur.snippets = [...(newNode.snippets || []), ...cur.snippets].slice(0, 5);
+              existingNodeMap.set(newNode.id, {
+                ...cur,
+                count: cur.count + newNode.count,
+                snippets: [...(newNode.snippets || []), ...(cur.snippets || [])].slice(0, 5),
+              });
             } else {
               existingNodeMap.set(newNode.id, {
                 ...newNode,
@@ -137,17 +157,22 @@ export default function KnowledgeGraph({
           // Merge links
           const linkKeyMap = new Map<string, GraphLink>();
           prev.links.forEach(l => {
-            const s = typeof l.source === 'object' ? l.source.id : l.source;
-            const t = typeof l.target === 'object' ? l.target.id : l.target;
-            linkKeyMap.set(`${s}:::${t}`, l);
+            const s = getEndpointId(l.source);
+            const t = getEndpointId(l.target);
+            if (validIds.has(s) && validIds.has(t)) {
+              linkKeyMap.set(`${s}:::${t}`, { ...l, source: s, target: t });
+            }
           });
           aiResult.links.forEach(l => {
-            if (validIds.has(l.source as string) && validIds.has(l.target as string)) {
-              const k = `${l.source}:::${l.target}`;
+            const s = getEndpointId(l.source);
+            const t = getEndpointId(l.target);
+            if (validIds.has(s) && validIds.has(t)) {
+              const k = `${s}:::${t}`;
               if (linkKeyMap.has(k)) {
-                linkKeyMap.get(k)!.weight += l.weight;
+                const curLink = linkKeyMap.get(k)!;
+                linkKeyMap.set(k, { ...curLink, weight: curLink.weight + l.weight });
               } else {
-                linkKeyMap.set(k, l);
+                linkKeyMap.set(k, { ...l, source: s, target: t });
               }
             }
           });
@@ -855,6 +880,13 @@ export default function KnowledgeGraph({
           className="w-full h-full cursor-grab active:cursor-grabbing"
           style={{ background: 'radial-gradient(ellipse at center, #0f131a 0%, #07080a 75%)' }}
         />
+
+        {/* Error State */}
+        {error && !isLoading && (
+          <div className="absolute top-16 left-4 z-20 px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/30 text-red-300 text-xs">
+            {error}
+          </div>
+        )}
 
         {/* Empty State */}
         {!isLoading && filteredData.nodes.length === 0 && (

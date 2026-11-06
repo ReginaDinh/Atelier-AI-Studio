@@ -18,9 +18,11 @@ import {
   collection,
   query,
   where,
+  orderBy,
   getDocs,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  deleteField
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -47,16 +49,6 @@ export interface FirestoreErrorInfo {
   path: string | null;
   authInfo: {
     userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
   };
 }
 
@@ -65,16 +57,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
     },
     operationType,
     path
@@ -111,6 +93,10 @@ export function sanitizeFirestoreId(rawId: string): string {
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 120);
   return cleaned.length > 0 ? cleaned : 'doc_default';
+}
+
+export function memoryDocId(uid: string, key: string): string {
+  return sanitizeFirestoreId(`${uid}_mem_${key}`);
 }
 
 const docWriteLocks = new Map<string, Promise<unknown>>();
@@ -197,9 +183,9 @@ export async function saveSessionToFirestore(session: {
         const updatePayload: Record<string, unknown> = {
           name,
           isPinned,
+          folderId: folderId ? folderId : deleteField(),
           updatedAt: serverTimestamp(),
         };
-        if (folderId) updatePayload.folderId = folderId;
         await updateDoc(sessionRef, updatePayload);
       }
     } catch (error) {
@@ -268,7 +254,7 @@ export async function saveMemoryToFirestore(memory: {
 }): Promise<void> {
   const user = auth.currentUser;
   if (!user || !memory.key?.trim() || !memory.value?.trim()) return;
-  const memDocId = sanitizeFirestoreId(`${user.uid}_mem_${memory.id || memory.key}`);
+  const memDocId = memoryDocId(user.uid, memory.key);
   const path = `memories/${memDocId}`;
   const memRef = doc(db, 'memories', memDocId);
 
@@ -298,10 +284,10 @@ export async function saveMemoryToFirestore(memory: {
   });
 }
 
-export async function deleteMemoryFromFirestore(memoryIdOrKey: string | number): Promise<void> {
+export async function deleteMemoryFromFirestore(key: string): Promise<void> {
   const user = auth.currentUser;
   if (!user) return;
-  const memDocId = sanitizeFirestoreId(`${user.uid}_mem_${memoryIdOrKey}`);
+  const memDocId = memoryDocId(user.uid, key);
   const path = `memories/${memDocId}`;
   return withDocWriteLock(path, async () => {
     try {
@@ -398,7 +384,8 @@ export function subscribeToBioscienceRecords(
       onRecords(items);
     },
     error => {
-      handleFirestoreError(error, OperationType.LIST, 'bioscienceRecords');
+      console.error('Bioscience records snapshot error:', error);
+      onRecords([]);
     }
   );
 }
@@ -483,30 +470,32 @@ export async function reconcileBidirectionalCloudSync(localUserId: string): Prom
   // 2. Pull Cloud Messages for top 15 sessions in parallel
   const cloudMessages: Array<{ sessionId: string; role: 'user' | 'model'; content: string }> = [];
   const sessionsToFetchMsgs = cloudSessionDocs.slice(0, 15);
-  await Promise.all(
+  const msgResults = await Promise.allSettled(
     sessionsToFetchMsgs.map(async s => {
-      const msgPath = `sessions/${s.docId}/messages`;
-      try {
-        const msgsQuery = query(
-          collection(db, 'sessions', s.docId, 'messages'),
-          where('ownerId', '==', user.uid)
-        );
-        const msgsSnap = await getDocs(msgsQuery);
-        msgsSnap.docs.forEach(md => {
+      const msgsQuery = query(
+        collection(db, 'sessions', s.docId, 'messages'),
+        where('ownerId', '==', user.uid),
+        orderBy('createdAt', 'asc')
+      );
+      const msgsSnap = await getDocs(msgsQuery);
+      return msgsSnap.docs
+        .map(md => {
           const mData = md.data();
-          if (mData.content) {
-            cloudMessages.push({
-              sessionId: s.id,
-              role: mData.role === 'user' ? 'user' : 'model',
-              content: String(mData.content),
-            });
-          }
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, msgPath);
-      }
+          if (!mData.content) return null;
+          return {
+            sessionId: s.id,
+            role: (mData.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+            content: String(mData.content),
+          };
+        })
+        .filter((item): item is { sessionId: string; role: 'user' | 'model'; content: string } => item !== null);
     })
   );
+  for (const res of msgResults) {
+    if (res.status === 'fulfilled') {
+      cloudMessages.push(...res.value);
+    }
+  }
 
   // 3. Pull Cloud Memories
   const cloudMemories = await fetchCloudMemoriesForUser(user.uid);
@@ -553,7 +542,6 @@ export async function reconcileBidirectionalCloudSync(localUserId: string): Prom
   for (const lm of localMemories.slice(0, 30)) {
     if (lm && lm.key && lm.value && !cloudMemoryKeys.has(String(lm.key).toLowerCase().trim())) {
       await saveMemoryToFirestore({
-        id: lm.id,
         key: lm.key,
         value: lm.value,
       }).catch(() => {});

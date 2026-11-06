@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, GenerateContentResponse, ThinkingLevel } from "@google/genai";
 import { createHash } from "crypto";
+import { requireAuth } from "./server-auth";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,6 +75,30 @@ function formatGeminiErrorMessage(error: any): { isAuthOrQuotaError: boolean; me
     message: raw || "Failed to generate Gemini response",
   };
 }
+
+const statusFromError = (raw: string) =>
+  raw.includes("401") || raw.includes("UNAUTHENTICATED") || raw.includes("API_KEY_INVALID") ? 401
+  : raw.includes("403") || raw.includes("PERMISSION_DENIED") ? 403
+  : raw.includes("429") || raw.includes("RESOURCE_EXHAUSTED") ? 429 : 502;
+
+const shouldFallbackToDefaultModel = (err: any) => {
+  const raw = String(err?.message || err || "");
+  if (
+    raw.includes("400") ||
+    raw.includes("INVALID_ARGUMENT") ||
+    raw.includes("401") ||
+    raw.includes("UNAUTHENTICATED") ||
+    raw.includes("API_KEY_INVALID") ||
+    raw.includes("ACCESS_TOKEN_TYPE_UNSUPPORTED") ||
+    raw.includes("API key not valid") ||
+    raw.includes("403") ||
+    raw.includes("PERMISSION_DENIED")
+  ) {
+    return false;
+  }
+  const st = statusFromError(raw);
+  return st === 429 || st >= 500 || raw.includes("404") || raw.includes("NOT_FOUND");
+};
 
 const MODEL_NAME = "gemini-3.8-flash";
 
@@ -231,6 +256,10 @@ async function startServer() {
   const PORT = argPort || (process.env.APP_PORT ? parseInt(process.env.APP_PORT, 10) : 3000);
 
   app.use(express.json({ limit: "25mb" }));
+  app.use("/api", requireAuth);
+
+  const ownsSession = (sessionId: string, uid: string) =>
+    !!db.prepare("SELECT 1 FROM sessions WHERE id = ? AND user_id = ?").get(sessionId, uid);
 
   const ALLOWED_MODELS = new Set([
     "gemini-4-argon",
@@ -405,7 +434,7 @@ async function startServer() {
         try {
           result = await runStreamWithModel(targetModel);
         } catch (primaryErr: any) {
-          if (targetModel !== MODEL_NAME) {
+          if (targetModel !== MODEL_NAME && shouldFallbackToDefaultModel(primaryErr)) {
             usedModel = MODEL_NAME;
             wasFallback = true;
             result = await runStreamWithModel(MODEL_NAME);
@@ -468,7 +497,7 @@ async function startServer() {
         try {
           response = await generateNonStream(targetModel);
         } catch (primaryErr: any) {
-          if (targetModel !== MODEL_NAME) {
+          if (targetModel !== MODEL_NAME && shouldFallbackToDefaultModel(primaryErr)) {
             usedModel = MODEL_NAME;
             wasFallback = true;
             response = await generateNonStream(MODEL_NAME);
@@ -483,19 +512,22 @@ async function startServer() {
       }
     } catch (error: any) {
       const formatted = formatGeminiErrorMessage(error);
+      const status = statusFromError(String(error?.message || error));
       if (req.body?.stream) {
         if (!res.headersSent) {
+          res.status(status);
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache");
           res.setHeader("Connection", "keep-alive");
         }
-        res.write(`data: ${JSON.stringify({ text: formatted.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: formatted.message })}\n\n`);
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       } else if (!res.headersSent) {
-        res.json({ text: formatted.message, error: formatted.message });
+        res.status(status).json({ error: formatted.message, authError: formatted.isAuthOrQuotaError });
       } else {
-        res.write(`data: ${JSON.stringify({ text: formatted.message, done: true })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: formatted.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       }
     }
@@ -553,7 +585,7 @@ async function startServer() {
       try {
         response = await runGen(targetModel);
       } catch (primaryErr: any) {
-        if (targetModel !== MODEL_NAME) {
+        if (targetModel !== MODEL_NAME && shouldFallbackToDefaultModel(primaryErr)) {
           usedModel = MODEL_NAME;
           wasFallback = true;
           response = await runGen(MODEL_NAME);
@@ -582,7 +614,7 @@ async function startServer() {
       });
     } catch (error: any) {
       const formatted = formatGeminiErrorMessage(error);
-      res.json({ text: "", error: formatted.message, authError: formatted.isAuthOrQuotaError });
+      res.status(statusFromError(String(error?.message || error))).json({ error: formatted.message, authError: formatted.isAuthOrQuotaError });
     }
   });
 
@@ -590,19 +622,19 @@ async function startServer() {
   
   // Folder Endpoints
   app.get("/api/folders", (req, res) => {
-    const { userId } = req.query;
-    if (!userId) return res.json([]);
+    const userId = req.uid!;
     const folders = db.prepare("SELECT * FROM folders WHERE user_id = ? ORDER BY created_at ASC").all(userId);
     res.json(folders);
   });
 
   app.post("/api/folders", (req, res) => {
-    const { id, userId, name, emoji, color } = req.body;
+    const userId = req.uid!;
+    const { id, name, emoji, color } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: "Folder name is required" });
     const folderId = id || ("fld_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 6));
     db.prepare("INSERT INTO folders (id, user_id, name, emoji, color) VALUES (?, ?, ?, ?, ?)").run(
       folderId,
-      userId || "anonymous",
+      userId,
       name.trim(),
       emoji || "📁",
       color || "amber"
@@ -611,30 +643,33 @@ async function startServer() {
   });
 
   app.put("/api/folders/:id", (req, res) => {
+    const userId = req.uid!;
     const { id } = req.params;
     const { name, emoji, color } = req.body;
     if (name !== undefined) {
-      db.prepare("UPDATE folders SET name = ? WHERE id = ?").run(name.trim(), id);
+      db.prepare("UPDATE folders SET name = ? WHERE id = ? AND user_id = ?").run(name.trim(), id, userId);
     }
     if (emoji !== undefined) {
-      db.prepare("UPDATE folders SET emoji = ? WHERE id = ?").run(emoji, id);
+      db.prepare("UPDATE folders SET emoji = ? WHERE id = ? AND user_id = ?").run(emoji, id, userId);
     }
     if (color !== undefined) {
-      db.prepare("UPDATE folders SET color = ? WHERE id = ?").run(color, id);
+      db.prepare("UPDATE folders SET color = ? WHERE id = ? AND user_id = ?").run(color, id, userId);
     }
     res.json({ success: true });
   });
 
   app.delete("/api/folders/:id", (req, res) => {
+    const userId = req.uid!;
     const { id } = req.params;
-    db.prepare("UPDATE sessions SET folder_id = NULL WHERE folder_id = ?").run(id);
-    db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+    db.prepare("UPDATE sessions SET folder_id = NULL WHERE folder_id = ? AND user_id = ?").run(id, userId);
+    db.prepare("DELETE FROM folders WHERE id = ? AND user_id = ?").run(id, userId);
     res.json({ success: true });
   });
 
   // Multi-Step Topic Clustering & Categorization with Gemini
   app.post("/api/gemini/cluster-categorize", async (req, res) => {
     try {
+      const userId = req.uid!;
       const { sessions, folders, model } = req.body;
       if (!folders || !folders.length) {
         return res.json({ clusters: [], assignments: [], totalCategorized: 0, reason: "No folders available for classification" });
@@ -646,7 +681,7 @@ async function startServer() {
       // Populate rich message history snippets from SQLite if missing
       const enrichedSessions = sessions.map((s: any) => {
         let snippet = s.messagesPreview || s.sampleText || "";
-        if (!snippet && s.id) {
+        if (!snippet && s.id && ownsSession(s.id, userId)) {
           try {
             const dbMsgs = db.prepare(
               "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 8"
@@ -824,18 +859,18 @@ Yêu cầu:
 
   // Get all sessions - pinned first, then by created_at DESC
   app.get("/api/sessions", (req, res) => {
-    const { userId } = req.query;
-    if (!userId) return res.json([]);
+    const userId = req.uid!;
     const sessions = db.prepare("SELECT * FROM sessions WHERE user_id = ? ORDER BY is_pinned DESC, created_at DESC").all(userId);
     res.json(sessions);
   });
 
   // Create a new session
   app.post("/api/sessions", (req, res) => {
-    const { id, name, userId, folder_id } = req.body;
+    const userId = req.uid!;
+    const { id, name, folder_id } = req.body;
     db.prepare("INSERT INTO sessions (id, user_id, name, is_pinned, folder_id) VALUES (?, ?, ?, 0, ?)").run(
       id,
-      userId || "anonymous",
+      userId,
       name || "New Chat",
       folder_id || null
     );
@@ -844,57 +879,65 @@ Yêu cầu:
 
   // Fork / Branch a session up to a specific message index
   app.post("/api/sessions/fork", (req, res) => {
-    const { sourceSessionId, newSessionId, name, userId, upToIndex } = req.body;
-    if (!sourceSessionId || !newSessionId || !userId) {
+    const userId = req.uid!;
+    const { sourceSessionId, newSessionId, name, upToIndex } = req.body;
+    if (!sourceSessionId || !newSessionId) {
       return res.status(400).json({ error: "Missing parameters" });
     }
-    const sourceSession = db.prepare("SELECT folder_id FROM sessions WHERE id = ?").get(sourceSessionId) as any;
-    db.prepare("INSERT INTO sessions (id, user_id, name, is_pinned, folder_id) VALUES (?, ?, ?, 0, ?)").run(
-      newSessionId,
-      userId,
-      name || "Branched Chat",
-      sourceSession?.folder_id || null
-    );
-
+    if (!ownsSession(sourceSessionId, userId)) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const sourceSession = db.prepare("SELECT folder_id FROM sessions WHERE id = ? AND user_id = ?").get(sourceSessionId, userId) as any;
     const existingMsgs = db
       .prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC")
       .all(sourceSessionId) as any[];
     const sliced = typeof upToIndex === "number" ? existingMsgs.slice(0, upToIndex + 1) : existingMsgs;
 
-    const insertStmt = db.prepare(
-      "INSERT INTO messages (session_id, role, content, grounding_metadata, images, emergence_analysis, user_analysis, follow_up_questions, intent_alignment, council_debate, deep_research, self_evaluation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    for (const m of sliced) {
-      insertStmt.run(
+    const runForkTx = db.transaction(() => {
+      db.prepare("INSERT INTO sessions (id, user_id, name, is_pinned, folder_id) VALUES (?, ?, ?, 0, ?)").run(
         newSessionId,
-        m.role,
-        m.content,
-        m.grounding_metadata,
-        m.images,
-        m.emergence_analysis,
-        m.user_analysis,
-        m.follow_up_questions,
-        m.intent_alignment,
-        m.council_debate,
-        m.deep_research,
-        m.self_evaluation || null
+        userId,
+        name || "Branched Chat",
+        sourceSession?.folder_id || null
       );
-    }
+
+      const insertStmt = db.prepare(
+        "INSERT INTO messages (session_id, role, content, grounding_metadata, images, emergence_analysis, user_analysis, follow_up_questions, intent_alignment, council_debate, deep_research, self_evaluation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+      for (const m of sliced) {
+        insertStmt.run(
+          newSessionId,
+          m.role,
+          m.content,
+          m.grounding_metadata,
+          m.images,
+          m.emergence_analysis,
+          m.user_analysis,
+          m.follow_up_questions,
+          m.intent_alignment,
+          m.council_debate,
+          m.deep_research,
+          m.self_evaluation || null
+        );
+      }
+    });
+    runForkTx();
     res.json({ success: true, id: newSessionId });
   });
 
   // Toggle/Update session pin, name, or folder_id
   const updateSessionHandler = (req: any, res: any) => {
+    const userId = req.uid!;
     const { id } = req.params;
     const { is_pinned, name, folder_id } = req.body;
     if (is_pinned !== undefined) {
-      db.prepare("UPDATE sessions SET is_pinned = ? WHERE id = ?").run(is_pinned ? 1 : 0, id);
+      db.prepare("UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ?").run(is_pinned ? 1 : 0, id, userId);
     }
     if (name !== undefined) {
-      db.prepare("UPDATE sessions SET name = ? WHERE id = ?").run(name, id);
+      db.prepare("UPDATE sessions SET name = ? WHERE id = ? AND user_id = ?").run(name, id, userId);
     }
     if (folder_id !== undefined) {
-      db.prepare("UPDATE sessions SET folder_id = ? WHERE id = ?").run(folder_id || null, id);
+      db.prepare("UPDATE sessions SET folder_id = ? WHERE id = ? AND user_id = ?").run(folder_id || null, id, userId);
     }
     res.json({ success: true });
   };
@@ -903,9 +946,12 @@ Yêu cầu:
 
   // Delete a session
   app.delete("/api/sessions/:id", (req, res) => {
+    const userId = req.uid!;
     const { id } = req.params;
-    db.prepare("DELETE FROM messages WHERE session_id = ?").run(id);
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    if (ownsSession(id, userId)) {
+      db.prepare("DELETE FROM messages WHERE session_id = ?").run(id);
+    }
+    db.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").run(id, userId);
     res.json({ success: true });
   });
 
@@ -935,8 +981,12 @@ Yêu cầu:
   // Get messages via query parameter (?sessionId=...)
   app.get("/api/messages", (req, res) => {
     try {
+      const userId = req.uid!;
       const sessionId = String(req.query.sessionId || "");
       if (!sessionId) return res.json([]);
+      if (!ownsSession(sessionId, userId)) {
+        return res.status(404).json({ error: "Not found" });
+      }
       const messages = db.prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC").all(sessionId);
       res.json(formatMessagesRows(messages));
     } catch (err) {
@@ -948,8 +998,12 @@ Yêu cầu:
   // Get messages for a session
   app.get("/api/messages/:sessionId", (req, res) => {
     try {
+      const userId = req.uid!;
       const { sessionId } = req.params;
       if (!sessionId) return res.json([]);
+      if (!ownsSession(sessionId, userId)) {
+        return res.status(404).json({ error: "Not found" });
+      }
       const messages = db.prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC").all(sessionId);
       res.json(formatMessagesRows(messages));
     } catch (err) {
@@ -960,8 +1014,12 @@ Yêu cầu:
 
   // Save a message
   app.post("/api/messages", (req, res) => {
+    const userId = req.uid!;
     const { sessionId, session_id, role, content, groundingMetadata, images, emergenceAnalysis, userAnalysis, followUpQuestions, intentAlignment, councilDebate, deepResearch, selfEvaluation } = req.body;
     const resolvedSessionId = sessionId || session_id;
+    if (!resolvedSessionId || !ownsSession(resolvedSessionId, userId)) {
+      return res.status(404).json({ error: "Not found" });
+    }
     const gm = groundingMetadata ? JSON.stringify(groundingMetadata) : null;
     const imgs = images ? JSON.stringify(images) : null;
     const emg = emergenceAnalysis ? JSON.stringify(emergenceAnalysis) : null;
@@ -979,7 +1037,14 @@ Yêu cầu:
 
   // Update a message
   app.put("/api/messages/:id", (req, res) => {
+    const userId = req.uid!;
     const { id } = req.params;
+    const ownsMsg = !!db
+      .prepare("SELECT 1 FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.id = ? AND s.user_id = ?")
+      .get(id, userId);
+    if (!ownsMsg) {
+      return res.status(404).json({ error: "Not found" });
+    }
     const { content, emergenceAnalysis, userAnalysis, followUpQuestions, intentAlignment, councilDebate, deepResearch, selfEvaluation } = req.body;
     if (content !== undefined) {
       db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, id);
@@ -1010,8 +1075,8 @@ Yêu cầu:
 
   // Analytics Dashboard aggregation endpoint
   app.get("/api/analytics", (req, res) => {
-    const { userId, sessionId } = req.query;
-    if (!userId) return res.status(400).json({ error: "userId required" });
+    const userId = req.uid!;
+    const { sessionId } = req.query;
 
     let query = `
       SELECT m.*, s.name as session_name 
@@ -1120,8 +1185,8 @@ Yêu cầu:
 
   // Knowledge Graph: Extract entities & relationships from chat history
   app.get("/api/knowledge-graph", (req, res) => {
-    const { userId, sessionId } = req.query;
-    if (!userId) return res.status(400).json({ error: "userId required" });
+    const userId = req.uid!;
+    const { sessionId } = req.query;
 
     let query = `
       SELECT m.*, s.name as session_name 
@@ -1432,8 +1497,8 @@ Yêu cầu:
   // Hybrid Semantic + Full-Text Search (SQLite FTS5 BM25 + Vietnamese Diacritic-Normalized RRF)
   app.get("/api/search", (req, res) => {
     const rawQuery = String(req.query.q || "").trim();
-    const userId = String(req.query.userId || "").trim();
-    if (!rawQuery || !userId) return res.json([]);
+    const userId = req.uid!;
+    if (!rawQuery) return res.json([]);
 
     const scoredMap = new Map<
       number,
@@ -1598,8 +1663,8 @@ Yêu cầu:
   // Two-Way Cloud Sync Engine: Atomic Hydration & Reconciliation (Firestore <-> SQLite)
   app.post("/api/cloud-sync/hydrate", (req, res) => {
     try {
-      const { userId, cloudSessions, cloudMessages, cloudMemories } = req.body;
-      if (!userId) return res.status(400).json({ error: "userId is required" });
+      const userId = req.uid!;
+      const { cloudSessions, cloudMessages, cloudMemories } = req.body;
 
       let hydratedSessions = 0;
       let hydratedMessages = 0;
@@ -1613,7 +1678,7 @@ Yêu cầu:
             "INSERT INTO sessions (id, user_id, name, is_pinned, folder_id) VALUES (?, ?, ?, ?, ?)"
           );
           const updateSessionStmt = db.prepare(
-            "UPDATE sessions SET name = ?, is_pinned = ?, folder_id = COALESCE(?, folder_id) WHERE id = ?"
+            "UPDATE sessions SET name = ?, is_pinned = ?, folder_id = COALESCE(?, folder_id) WHERE id = ? AND user_id = ?"
           );
 
           for (const cs of cloudSessions) {
@@ -1629,7 +1694,7 @@ Yêu cầu:
               );
               hydratedSessions++;
             } else if (cs.name && existing.name !== cs.name && /^Chat \d+$/i.test(existing.name)) {
-              updateSessionStmt.run(cs.name, cs.isPinned ? 1 : existing.is_pinned, cs.folderId || null, cs.id);
+              updateSessionStmt.run(cs.name, cs.isPinned ? 1 : existing.is_pinned, cs.folderId || null, cs.id, userId);
             }
           }
         }
@@ -1644,6 +1709,7 @@ Yêu cầu:
           const existingBySession = new Map<string, Set<string>>();
           for (const cm of cloudMessages) {
             if (!cm || !cm.sessionId || !cm.content) continue;
+            if (!ownsSession(cm.sessionId, userId)) continue;
             let sessionSet = existingBySession.get(cm.sessionId);
             if (!sessionSet) {
               const rows = checkMsgsStmt.all(cm.sessionId) as any[];
@@ -1706,13 +1772,14 @@ Yêu cầu:
 
   // User Memory Endpoints
   app.get("/api/memory", (req, res) => {
-    const { userId } = req.query;
+    const userId = req.uid!;
     const memory = db.prepare("SELECT * FROM user_memory WHERE user_id = ?").all(userId);
     res.json(memory);
   });
 
   app.post("/api/memory", (req, res) => {
-    const { userId, key, value } = req.body;
+    const userId = req.uid!;
+    const { key, value } = req.body;
     const existing = db.prepare("SELECT id FROM user_memory WHERE user_id = ? AND key = ?").get(userId, key) as any;
     if (existing) {
       db.prepare("UPDATE user_memory SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(value, existing.id);
@@ -1723,43 +1790,48 @@ Yêu cầu:
   });
 
   app.delete("/api/memory/:id", (req, res) => {
-    db.prepare("DELETE FROM user_memory WHERE id = ?").run(req.params.id);
+    const userId = req.uid!;
+    db.prepare("DELETE FROM user_memory WHERE id = ? AND user_id = ?").run(req.params.id, userId);
     res.json({ success: true });
   });
 
   // Documents Endpoints
   app.get("/api/documents", (req, res) => {
-    const { userId } = req.query;
+    const userId = req.uid!;
     const docs = db.prepare("SELECT * FROM documents WHERE user_id = ? ORDER BY created_at DESC").all(userId);
     res.json(docs);
   });
 
   app.post("/api/documents", (req, res) => {
-    const { userId, title, content } = req.body;
+    const userId = req.uid!;
+    const { title, content } = req.body;
     db.prepare("INSERT INTO documents (user_id, title, content) VALUES (?, ?, ?)").run(userId, title, content);
     res.json({ success: true });
   });
 
   app.delete("/api/documents/:id", (req, res) => {
-    db.prepare("DELETE FROM documents WHERE id = ?").run(req.params.id);
+    const userId = req.uid!;
+    db.prepare("DELETE FROM documents WHERE id = ? AND user_id = ?").run(req.params.id, userId);
     res.json({ success: true });
   });
 
   // Notes Endpoints
   app.get("/api/notes", (req, res) => {
-    const { userId } = req.query;
+    const userId = req.uid!;
     const notes = db.prepare("SELECT * FROM notes WHERE user_id = ? ORDER BY created_at DESC").all(userId);
     res.json(notes);
   });
 
   app.post("/api/notes", (req, res) => {
-    const { userId, title, content } = req.body;
+    const userId = req.uid!;
+    const { title, content } = req.body;
     db.prepare("INSERT INTO notes (user_id, title, content) VALUES (?, ?, ?)").run(userId, title, content);
     res.json({ success: true });
   });
 
   app.delete("/api/notes/:id", (req, res) => {
-    db.prepare("DELETE FROM notes WHERE id = ?").run(req.params.id);
+    const userId = req.uid!;
+    db.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?").run(req.params.id, userId);
     res.json({ success: true });
   });
 
@@ -1828,13 +1900,7 @@ Trình bày rõ ràng bằng tiếng Việt chuyên ngành chuẩn xác, súc t�
       });
     } catch (error: any) {
       const formatted = formatGeminiErrorMessage(error);
-      res.json({
-        text: formatted.message,
-        groundingMetadata: null,
-        sources: [],
-        webSearchQueries: [],
-        error: formatted.message,
-      });
+      res.status(statusFromError(String(error?.message || error))).json({ error: formatted.message, authError: formatted.isAuthOrQuotaError });
     }
   });
 

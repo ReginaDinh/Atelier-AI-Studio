@@ -80,6 +80,32 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
   const rawStructureTextRef = useRef<{ data: string; format: 'pdb' | 'cif'; source: 'alphafold' | 'pdb' } | null>(null);
+  const repStyleRef = useRef<'cartoon' | 'stick' | 'surface'>(repStyle);
+  const colorModeRef = useRef<'plddt' | 'spectrum' | 'chain'>(colorMode);
+  const didInitRef = useRef(false);
+  const searchSeqRef = useRef(0);
+
+  useEffect(() => {
+    repStyleRef.current = repStyle;
+  }, [repStyle]);
+
+  useEffect(() => {
+    colorModeRef.current = colorMode;
+  }, [colorMode]);
+
+  useEffect(() => {
+    return () => {
+      if (viewerInstanceRef.current) {
+        try {
+          viewerInstanceRef.current.clear();
+        } catch (_) {}
+        viewerInstanceRef.current = null;
+      }
+      if (viewerContainerRef.current) {
+        viewerContainerRef.current.innerHTML = '';
+      }
+    };
+  }, []);
 
   // 2. Genomics & ClinVar State
   const [clinvarVariants, setClinvarVariants] = useState<any[]>([]);
@@ -150,19 +176,25 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
   // Render 3D structure into container
   const renderStructureIn3Dmol = useCallback(
     (coordData: string, format: 'pdb' | 'cif', sourceType: 'alphafold' | 'pdb') => {
-      if (!viewerContainerRef.current) return;
+      const container = viewerContainerRef.current;
+      if (!container) return;
       try {
-        if (!viewerInstanceRef.current) {
-          viewerInstanceRef.current = $3Dmol.createViewer(viewerContainerRef.current, {
-            backgroundColor: '#090d16',
-            antialias: true,
-          });
+        if (viewerInstanceRef.current) {
+          try {
+            viewerInstanceRef.current.clear();
+          } catch (_) {}
+          viewerInstanceRef.current = null;
         }
+        container.innerHTML = '';
+        viewerInstanceRef.current = $3Dmol.createViewer(container, {
+          backgroundColor: '#090d16',
+          antialias: true,
+        });
         const viewer = viewerInstanceRef.current;
         viewer.clear();
         viewer.addModel(coordData, format);
 
-        applyViewerStyle(viewer, repStyle, colorMode, sourceType);
+        applyViewerStyle(viewer, repStyleRef.current, colorModeRef.current, sourceType);
 
         // Hover callback for residue inspection
         viewer.setHoverable(
@@ -189,7 +221,7 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         console.error('3Dmol render error:', err);
       }
     },
-    [applyViewerStyle, repStyle, colorMode]
+    [applyViewerStyle]
   );
 
   // Re-apply style when representation or colorMode changes
@@ -208,7 +240,6 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
   useEffect(() => {
     if (activeTab === 'protein' && rawStructureTextRef.current && viewerContainerRef.current) {
       const timer = setTimeout(() => {
-        viewerInstanceRef.current = null;
         if (rawStructureTextRef.current) {
           renderStructureIn3Dmol(
             rawStructureTextRef.current.data,
@@ -224,8 +255,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
   // 1. Fetch Protein + AlphaFold / PDB
   const fetchProteinWorkbench = useCallback(
     async (queryStr: string, fallbackPdb?: string) => {
+      const seq = ++searchSeqRef.current;
       setIsLoading(true);
       setErrorMsg(null);
+      setAlphafoldData(null);
       const clean = queryStr.trim();
       try {
         // Check if query is a 4-char PDB ID (starts with digit 1-9)
@@ -233,8 +266,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         if (isDirectPdb) {
           const pdbIdUpper = clean.toUpperCase();
           const pdbRes = await fetch(`https://files.rcsb.org/download/${pdbIdUpper}.pdb`);
+          if (seq !== searchSeqRef.current) return;
           if (!pdbRes.ok) throw new Error(`RCSB PDB structure not found: ${pdbIdUpper}`);
           const pdbText = await pdbRes.text();
+          if (seq !== searchSeqRef.current) return;
           setActivePdbId(pdbIdUpper);
           setStructureSource('pdb');
           rawStructureTextRef.current = { data: pdbText, format: 'pdb', source: 'pdb' };
@@ -248,13 +283,17 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
           `(${clean}) AND (reviewed:true)`
         )}&format=json&size=1`;
         let uniRes = await fetch(uniprotUrl);
+        if (seq !== searchSeqRef.current) return;
         let uniJson = await uniRes.json();
+        if (seq !== searchSeqRef.current) return;
 
         if (!uniJson.results || uniJson.results.length === 0) {
           uniRes = await fetch(
             `https://rest.uniprot.org/uniprotkb/search?query=${encodeURIComponent(clean)}&format=json&size=1`
           );
+          if (seq !== searchSeqRef.current) return;
           uniJson = await uniRes.json();
+          if (seq !== searchSeqRef.current) return;
         }
 
         if (!uniJson.results || uniJson.results.length === 0) {
@@ -309,16 +348,20 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         let loaded3D = false;
         try {
           const afRes = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${accession}`);
+          if (seq !== searchSeqRef.current) return;
           if (afRes.ok) {
             const afJson = await afRes.json();
+            if (seq !== searchSeqRef.current) return;
             const afEntry = Array.isArray(afJson) ? afJson[0] : afJson;
             if (afEntry && (afEntry.pdbUrl || afEntry.cifUrl)) {
               setAlphafoldData(afEntry);
               const structUrl = afEntry.pdbUrl || afEntry.cifUrl;
               const format: 'pdb' | 'cif' = afEntry.pdbUrl ? 'pdb' : 'cif';
               const coordRes = await fetch(structUrl);
+              if (seq !== searchSeqRef.current) return;
               if (coordRes.ok) {
                 const coordText = await coordRes.text();
+                if (seq !== searchSeqRef.current) return;
                 setStructureSource('alphafold');
                 setActivePdbId(`AF-${accession}`);
                 rawStructureTextRef.current = { data: coordText, format, source: 'alphafold' };
@@ -335,8 +378,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         if (!loaded3D) {
           const targetPdb = pdbCrossRefs[0] || fallbackPdb || '1TUP';
           const pdbRes = await fetch(`https://files.rcsb.org/download/${targetPdb}.pdb`);
+          if (seq !== searchSeqRef.current) return;
           if (pdbRes.ok) {
             const pdbText = await pdbRes.text();
+            if (seq !== searchSeqRef.current) return;
             setStructureSource('pdb');
             setActivePdbId(targetPdb);
             rawStructureTextRef.current = { data: pdbText, format: 'pdb', source: 'pdb' };
@@ -344,9 +389,12 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
           }
         }
       } catch (err: any) {
+        if (seq !== searchSeqRef.current) return;
         setErrorMsg(err.message || 'Failed to load Protein data & 3D Structure.');
       } finally {
-        setIsLoading(false);
+        if (seq === searchSeqRef.current) {
+          setIsLoading(false);
+        }
       }
     },
     [renderStructureIn3Dmol]
@@ -354,25 +402,32 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
   // Switch between AlphaFold and specific experimental PDB cross-reference
   const loadSpecificPdb = async (pdbId: string) => {
+    const seq = ++searchSeqRef.current;
     setIsLoading(true);
     try {
       const res = await fetch(`https://files.rcsb.org/download/${pdbId}.pdb`);
+      if (seq !== searchSeqRef.current) return;
       if (!res.ok) throw new Error(`Failed to fetch PDB ${pdbId}`);
       const text = await res.text();
+      if (seq !== searchSeqRef.current) return;
       setStructureSource('pdb');
       setActivePdbId(pdbId);
       setColorMode('spectrum');
       rawStructureTextRef.current = { data: text, format: 'pdb', source: 'pdb' };
       renderStructureIn3Dmol(text, 'pdb', 'pdb');
     } catch (e: any) {
+      if (seq !== searchSeqRef.current) return;
       setErrorMsg(e.message);
     } finally {
-      setIsLoading(false);
+      if (seq === searchSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   // 2. Fetch Genomics & ClinVar Variants
   const fetchGenomicsWorkbench = useCallback(async (geneQuery: string) => {
+    const seq = ++searchSeqRef.current;
     setIsLoading(true);
     setErrorMsg(null);
     const cleanGene = geneQuery.trim().toUpperCase();
@@ -382,7 +437,9 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         `${cleanGene}[gene] AND ("clinsig pathogenic"[Properties] OR "clinsig likely pathogenic"[Properties])`
       )}&retmode=json&retmax=10`;
       const searchRes = await fetch(searchUrl);
+      if (seq !== searchSeqRef.current) return;
       const searchJson = await searchRes.json();
+      if (seq !== searchSeqRef.current) return;
       const ids: string[] = searchJson?.esearchresult?.idlist || [];
 
       if (ids.length === 0) {
@@ -395,7 +452,9 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         ','
       )}&retmode=json`;
       const summaryRes = await fetch(summaryUrl);
+      if (seq !== searchSeqRef.current) return;
       const summaryJson = await summaryRes.json();
+      if (seq !== searchSeqRef.current) return;
       const resultObj = summaryJson?.result || {};
 
       const parsed = ids
@@ -435,14 +494,18 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
       setClinvarVariants(parsed);
     } catch (err: any) {
+      if (seq !== searchSeqRef.current) return;
       setErrorMsg(err.message || 'Failed to query NCBI ClinVar.');
     } finally {
-      setIsLoading(false);
+      if (seq === searchSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   // 3. Fetch Chemistry & Drug Discovery (PubChem + ChEMBL)
   const fetchChemistryWorkbench = useCallback(async (compoundQuery: string) => {
+    const seq = ++searchSeqRef.current;
     setIsLoading(true);
     setErrorMsg(null);
     const cleanName = compoundQuery.trim();
@@ -452,10 +515,12 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
       )}/property/MolecularFormula,MolecularWeight,CanonicalSMILES,IsomericSMILES,IUPACName,XLogP,TPSA,HBondDonorCount,HBondAcceptorCount,RotatableBondCount/JSON`;
 
       const propRes = await fetch(propUrl);
+      if (seq !== searchSeqRef.current) return;
       if (!propRes.ok) {
         throw new Error(`Compound "${cleanName}" not found on PubChem. Try a drug name (e.g., Imatinib, Aspirin, Metformin, Gefitinib).`);
       }
       const propJson = await propRes.json();
+      if (seq !== searchSeqRef.current) return;
       const props = propJson?.PropertyTable?.Properties?.[0];
       if (!props) throw new Error('Empty PubChem property data.');
 
@@ -470,8 +535,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         const chemblRes = await fetch(
           `https://www.ebi.ac.uk/chembl/api/data/molecule/search.json?q=${encodeURIComponent(cleanName)}&limit=1`
         );
+        if (seq !== searchSeqRef.current) return;
         if (chemblRes.ok) {
           const chemblJson = await chemblRes.json();
+          if (seq !== searchSeqRef.current) return;
           const mol = chemblJson?.molecules?.[0];
           if (mol) {
             setChemblInfo({
@@ -488,8 +555,10 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
               const mechRes = await fetch(
                 `https://www.ebi.ac.uk/chembl/api/data/mechanism.json?molecule_chembl_id=${mol.molecule_chembl_id}`
               );
+              if (seq !== searchSeqRef.current) return;
               if (mechRes.ok) {
                 const mechJson = await mechRes.json();
+                if (seq !== searchSeqRef.current) return;
                 setMechanisms(mechJson?.mechanisms || []);
               }
             }
@@ -502,14 +571,18 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         console.warn('ChEMBL lookup warning:', chemblErr);
       }
     } catch (err: any) {
+      if (seq !== searchSeqRef.current) return;
       setErrorMsg(err.message || 'Failed to query PubChem / ChEMBL compound.');
     } finally {
-      setIsLoading(false);
+      if (seq === searchSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   // 4. Fetch Biomedical Literature (Europe PMC + arXiv proxy)
   const fetchLiteratureWorkbench = useCallback(async (topicQuery: string) => {
+    const seq = ++searchSeqRef.current;
     setIsLoading(true);
     setErrorMsg(null);
     const cleanQ = topicQuery.trim();
@@ -518,15 +591,19 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         cleanQ
       )}&format=json&pageSize=6&resultType=core`;
       const epmcRes = await fetch(epmcUrl);
+      if (seq !== searchSeqRef.current) return;
       const epmcJson = await epmcRes.json();
+      if (seq !== searchSeqRef.current) return;
       const results = epmcJson?.resultList?.result || [];
       setPapers(results);
 
       // Fetch arXiv preprints via server proxy
       try {
         const arxivRes = await fetch(`/api/arxiv?q=${encodeURIComponent(`all:${cleanQ}`)}&max_results=4`);
+        if (seq !== searchSeqRef.current) return;
         if (arxivRes.ok) {
           const xmlText = await arxivRes.text();
+          if (seq !== searchSeqRef.current) return;
           const parser = new DOMParser();
           const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
           const entries = Array.from(xmlDoc.querySelectorAll('entry')).map(entry => ({
@@ -545,9 +622,12 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
         console.warn('arXiv proxy warning:', arxivErr);
       }
     } catch (err: any) {
+      if (seq !== searchSeqRef.current) return;
       setErrorMsg(err.message || 'Failed to query Europe PMC / PubMed literature.');
     } finally {
-      setIsLoading(false);
+      if (seq === searchSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -591,6 +671,8 @@ export const BioscienceStudio: React.FC<BioscienceStudioProps> = ({
 
   // Initial load on mount: auto-load TP53 so the user lands directly on a live 3D molecular + genomic workspace
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
     fetchProteinWorkbench('TP53', '1TUP');
   }, [fetchProteinWorkbench]);
 

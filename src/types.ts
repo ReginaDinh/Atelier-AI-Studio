@@ -90,6 +90,7 @@ export interface DeepResearchData {
 
 export interface Message {
   id?: number;
+  clientId?: string;
   session_id?: string;
   role: 'user' | 'model';
   content: string;

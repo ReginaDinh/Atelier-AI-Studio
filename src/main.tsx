@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {registerSW} from 'virtual:pwa-register';
 import App from './App.tsx';
 import './index.css';
+import { installAuthFetch } from './lib/authFetch';
 
 const BUILD_CACHE_VERSION = 'atelier-pwa-v5.0';
 
@@ -43,6 +44,8 @@ if (typeof window !== 'undefined') {
     });
   }
 }
+
+installAuthFetch();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
