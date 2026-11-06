@@ -2337,7 +2337,7 @@ export function evaluateAndEvolveTurnLocally(
       ruleBuilder: (m) => `Strictly avoid using or repeating: ${m[1].trim()}`,
     },
     {
-      regex: /(?:please\s+)?(?:be more concise|shorter|concise|more detailed|add examples|include mermaid|hãy trả lời ngắn gọn)/i,
+      regex: /(?:please\s+)?(be more concise|shorter|concise|more detailed|add examples|include mermaid|hãy trả lời ngắn gọn)/i,
       category: "formatting",
       ruleBuilder: (m) => `Prioritize presentation style: ${m[1].trim()} across all responses`,
     },

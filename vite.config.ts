@@ -96,12 +96,14 @@ export default defineConfig(() => {
       }),
     ],
     resolve: {
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve(__dirname, '.'),
         mermaid: path.resolve(__dirname, 'node_modules/mermaid/dist/mermaid.esm.min.mjs'),
       },
     },
     optimizeDeps: {
+      include: ['react', 'react-dom', 'react-dom/client', 'motion/react'],
       exclude: ['mermaid', '3dmol'],
     },
     server: {
