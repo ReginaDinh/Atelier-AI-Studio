@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, GenerateContentResponse, ThinkingLevel } from "@google/genai";
+import { createHash } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -273,7 +274,9 @@ async function startServer() {
   const responseCache = new Map<string, { text: string; groundingMetadata: any; timestamp: number }>();
   const CACHE_TTL_MS = 30 * 60 * 1000;
   const makeCacheKey = (model: string, prompt: string, sys?: string, search?: boolean, effort?: string) =>
-    `${model}::${effort || "auto"}::${Boolean(search)}::${(sys || "").slice(0, 120)}::${(prompt || "").trim().toLowerCase().replace(/\s+/g, " ")}`;
+    createHash("sha256")
+      .update(JSON.stringify([model, effort || "auto", Boolean(search), sys || "", prompt || ""]))
+      .digest("hex");
 
   // Real-Time FinOps & Quota Usage Telemetry
   const finopsTelemetry = {
@@ -411,8 +414,11 @@ async function startServer() {
           }
         }
 
+        let clientClosed = false;
+        req.on("close", () => { clientClosed = true; });
         let totalStreamedChars = 0;
         for await (const chunk of result) {
+          if (clientClosed) break;
           const resp = chunk as GenerateContentResponse;
           const text = resp.text || "";
           totalStreamedChars += text.length;
@@ -420,9 +426,13 @@ async function startServer() {
           res.write(`data: ${JSON.stringify({ text, groundingMetadata })}\n\n`);
         }
 
-        recordFinopsUsage(usedModel, inputCharsEst, totalStreamedChars, wasFallback);
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
+        if (clientClosed) {
+          recordFinopsUsage(usedModel, inputCharsEst, totalStreamedChars, wasFallback);
+        } else {
+          recordFinopsUsage(usedModel, inputCharsEst, totalStreamedChars, wasFallback);
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          res.end();
+        }
       } else {
         const isTemperatureDeprecatedModel = (m: string) =>
           m === "gemini-3.8-flash" || m === "gemini-4-argon";

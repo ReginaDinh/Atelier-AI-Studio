@@ -27,6 +27,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katex from 'katex';
+import DOMPurify from 'dompurify';
 import { ArtifactItem } from '../types';
 import { cn } from '../lib/utils';
 import MermaidRenderer from './MermaidRenderer';
@@ -1571,7 +1572,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                   >
                     <div
                       className="max-w-full max-h-full"
-                      dangerouslySetInnerHTML={{ __html: activeArtifact.code }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(activeArtifact.code, { USE_PROFILES: { svg: true, svgFilters: true } }) }}
                     />
                   </div>
                 ) : (

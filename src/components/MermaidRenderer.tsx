@@ -443,7 +443,7 @@ export default function MermaidRenderer({
         mermaid.initialize({
           startOnLoad: false,
           theme: 'base',
-          securityLevel: 'loose',
+          securityLevel: 'strict',
           fontFamily: '"Google Sans Text", "Google Sans", system-ui, -apple-system, sans-serif',
           flowchart: {
             htmlLabels: true,

@@ -414,6 +414,10 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Detect mobile phone / virtual keyboard to prevent accidental sends on Enter
@@ -552,18 +556,17 @@ export default function App() {
     if (!firebaseUser || !userId) return;
 
     const triggerSilentAutoSync = () => {
+      if (isLoadingRef.current) return;
       if (document.visibilityState === 'visible') {
         handleBidirectionalCloudSync(userId, true);
       }
     };
 
     const intervalId = window.setInterval(triggerSilentAutoSync, 60000);
-    window.addEventListener('focus', triggerSilentAutoSync);
     document.addEventListener('visibilitychange', triggerSilentAutoSync);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener('focus', triggerSilentAutoSync);
       document.removeEventListener('visibilitychange', triggerSilentAutoSync);
     };
   }, [firebaseUser, userId]);
@@ -749,6 +752,7 @@ export default function App() {
   const recognitionRef = useRef<any>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const skipNextFetchRef = useRef(false);
 
   useEffect(() => {
     if (userId) {
@@ -761,6 +765,10 @@ export default function App() {
   }, [userId]);
 
   useEffect(() => {
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
     if (currentSessionId && userId) {
       fetchMessages(currentSessionId);
     } else {
@@ -769,7 +777,10 @@ export default function App() {
   }, [currentSessionId, userId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scrollContainer = messagesEndRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
+    if (!scrollContainer || scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 150) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -1261,7 +1272,10 @@ export default function App() {
     }
     const data = await safeFetchJson<Message[]>(`/api/messages?sessionId=${encodeURIComponent(id)}`, undefined, []);
     if (Array.isArray(data)) {
-      setMessages(data);
+      setMessages(prev => {
+        const same = prev.length === data.length && prev.every((m, i) => m.id === data[i].id && m.content === data[i].content);
+        return same ? prev : data;
+      });
     }
   };
 
@@ -1895,6 +1909,7 @@ export default function App() {
           body: JSON.stringify({ ...newSession, userId }),
         });
         setSessions((prev) => [newSession, ...prev]);
+        skipNextFetchRef.current = true;
         setCurrentSessionId(activeSessionId);
       }
 
@@ -2467,8 +2482,10 @@ export default function App() {
         console.error(error);
       }
     } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsLoading(false);
+      }
       fetchFinopsTelemetry();
     }
   };
@@ -5397,15 +5414,6 @@ export default function App() {
                                   <div className="flex items-center gap-2 py-1.5 text-xs opacity-75">
                                     <Loader2 size={13} className="animate-spin text-indigo-500 shrink-0" />
                                     <span>Generating...</span>
-                                    <button
-                                      type="button"
-                                      onClick={handleStopExecution}
-                                      className="ml-2 px-2 py-0.5 rounded border text-[11px] font-medium text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors inline-flex items-center gap-1"
-                                      title="Stop generation"
-                                    >
-                                      <Square size={9} className="fill-current" />
-                                      <span>Stop</span>
-                                    </button>
                                   </div>
                                 )
                               )}
@@ -5596,27 +5604,6 @@ export default function App() {
                 : "bg-[#09090b]/98 border-[#27272a]"
             )}>
               <div className={cn("relative", getChatContainerClass())}>
-                {/* Floating Stop Execution Pill */}
-                {isLoading && (
-                  <div className="flex items-center justify-center mb-2">
-                    <button
-                      type="button"
-                      onClick={handleStopExecution}
-                      className={cn(
-                        "px-3 py-1 rounded-full text-xs font-medium border shadow-xs inline-flex items-center gap-1.5 transition-all animate-in fade-in zoom-in-95",
-                        isEditorial
-                          ? "bg-white hover:bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300"
-                          : "bg-[#18181b] hover:bg-rose-500/15 text-rose-300 border-rose-500/30 hover:border-rose-500/50"
-                      )}
-                      title="Stop generation (Esc)"
-                    >
-                      <Square size={10} className="fill-current text-rose-500 shrink-0" />
-                      <span>Stop generating</span>
-                      <kbd className="hidden sm:inline-block ml-1 text-[9px] font-mono px-1 py-0.5 rounded bg-black/5 dark:bg-white/10 opacity-70">Esc</kbd>
-                    </button>
-                  </div>
-                )}
-
                 {/* Attached Context & Image Previews */}
                 {(attachedContexts.length > 0 || selectedImages.length > 0) && (
                   <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
