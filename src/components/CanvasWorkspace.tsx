@@ -228,16 +228,20 @@ const LATEX_SNIPPETS: { label: string; insert: string }[] = [
   },
 ];
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function renderKatexSafe(tex: string, displayMode: boolean): string {
   try {
     return katex.renderToString(tex.trim(), {
       displayMode,
       throwOnError: false,
-      trust: true,
+      trust: false,
       strict: false,
     });
   } catch {
-    return `<code class="text-rose-500 font-mono text-xs">${tex}</code>`;
+    return `<code class="text-rose-500 font-mono text-xs">${escapeHtml(tex)}</code>`;
   }
 }
 
